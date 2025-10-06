@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Candle Schema",
+  "description": "Схема свечных данных (OHLCV)",
+  "type": "object",
+  "required": ["open", "high", "low", "close", "volume", "begin", "end"],
+  "properties": {
+    "open": {
+      "type": "number",
+      "description": "Цена открытия",
+      "minimum": 0
+    },
+    "high": {
+      "type": "number",
+      "description": "Максимальная цена",
+      "minimum": 0
+    },
+    "low": {
+      "type": "number",
+      "description": "Минимальная цена",
+      "minimum": 0
+    },
+    "close": {
+      "type": "number",
+      "description": "Цена закрытия",
+      "minimum": 0
+    },
+    "volume": {
+      "type": "integer",
+      "description": "Объём торгов",
+      "minimum": 0
+    },
+    "begin": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Время начала свечи (ISO 8601)"
+    },
+    "end": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Время окончания свечи (ISO 8601)"
+    },
+    "value": {
+      "type": "number",
+      "description": "Объём в валюте (опционально)",
+      "minimum": 0
+    }
+  }
+}
+

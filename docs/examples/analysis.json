@@ -1,0 +1,75 @@
+{
+  "generated_at": "2025-10-06T19:10:00+03:00",
+  "universe": [
+    "SBER",
+    "GAZP",
+    "LKOH"
+  ],
+  "by_symbol": {
+    "SBER": {
+      "price": 285.50,
+      "lot": 10,
+      "div_ttm": 25.20,
+      "dy_pct": 8.83,
+      "sma_20": 282.15,
+      "sma_50": 278.90,
+      "sma_200": 265.40,
+      "high_52w": 310.50,
+      "low_52w": 240.80,
+      "dist_52w_low_pct": 18.56,
+      "dist_52w_high_pct": 8.75,
+      "signals": [
+        "PRICE_ABOVE_SMA200",
+        "DY_GT_TARGET"
+      ],
+      "meta": {
+        "board": "TQBR",
+        "error": null,
+        "updated_at": "2025-10-06T19:05:30+03:00"
+      }
+    },
+    "GAZP": {
+      "price": 168.75,
+      "lot": 10,
+      "div_ttm": 15.80,
+      "dy_pct": 9.36,
+      "sma_20": 170.20,
+      "sma_50": 172.45,
+      "sma_200": 175.60,
+      "high_52w": 195.30,
+      "low_52w": 155.20,
+      "dist_52w_low_pct": 8.72,
+      "dist_52w_high_pct": 15.75,
+      "signals": [
+        "PRICE_BELOW_SMA200",
+        "DY_GT_TARGET",
+        "NEAR_52W_LOW"
+      ],
+      "meta": {
+        "board": "TQBR",
+        "error": null,
+        "updated_at": "2025-10-06T19:05:45+03:00"
+      }
+    },
+    "LKOH": {
+      "price": null,
+      "lot": null,
+      "div_ttm": null,
+      "dy_pct": null,
+      "sma_20": null,
+      "sma_50": null,
+      "sma_200": null,
+      "high_52w": null,
+      "low_52w": null,
+      "dist_52w_low_pct": null,
+      "dist_52w_high_pct": null,
+      "signals": [],
+      "meta": {
+        "board": null,
+        "error": "Failed to fetch data: Connection timeout",
+        "updated_at": null
+      }
+    }
+  }
+}
+

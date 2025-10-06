@@ -1,0 +1,41 @@
+{
+  "name": "Основной портфель",
+  "currency": "RUB",
+  "cash": 50000.00,
+  "positions": [
+    {
+      "symbol": "SBER",
+      "quantity": 100,
+      "avg_price": 265.30,
+      "market": "moex",
+      "type": "stock",
+      "notes": "Голубые фишки, дивидендная стратегия"
+    },
+    {
+      "symbol": "GAZP",
+      "quantity": 50,
+      "avg_price": 172.80,
+      "market": "moex",
+      "type": "stock",
+      "notes": "Высокая дивидендная доходность"
+    },
+    {
+      "symbol": "LKOH",
+      "quantity": 20,
+      "avg_price": 6450.00,
+      "market": "moex",
+      "type": "stock"
+    },
+    {
+      "symbol": "YNDX",
+      "quantity": 15,
+      "avg_price": 3200.00,
+      "market": "moex",
+      "type": "stock",
+      "notes": "Рост IT-сектора"
+    }
+  ],
+  "created_at": "2025-01-15T10:00:00+03:00",
+  "updated_at": "2025-10-06T18:30:00+03:00"
+}
+

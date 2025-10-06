@@ -1,0 +1,223 @@
+/* Кастомные стили для Stock Analytics */
+
+:root {
+    --success-color: #28a745;
+    --danger-color: #dc3545;
+    --warning-color: #ffc107;
+    --info-color: #17a2b8;
+}
+
+body {
+    background-color: #f8f9fa;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+}
+
+.navbar {
+    box-shadow: 0 2px 4px rgba(0,0,0,.1);
+}
+
+.card {
+    box-shadow: 0 0.125rem 0.25rem rgba(0,0,0,0.075);
+    border-radius: 0.5rem;
+    margin-bottom: 1rem;
+}
+
+.card-header {
+    background-color: #fff;
+    border-bottom: 1px solid #e9ecef;
+    font-weight: 600;
+}
+
+/* Таблицы */
+.table {
+    margin-bottom: 0;
+}
+
+.table thead th {
+    border-bottom: 2px solid #dee2e6;
+    font-weight: 600;
+    font-size: 0.875rem;
+    text-transform: uppercase;
+    color: #6c757d;
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(0,0,0,0.02);
+}
+
+/* Бейджи для сигналов */
+.badge {
+    font-size: 0.7rem;
+    padding: 0.25em 0.6em;
+    margin: 0.1rem;
+}
+
+.signal-badge {
+    display: inline-block;
+    margin: 2px;
+}
+
+/* Тренд индикаторы */
+.trend-up {
+    color: var(--success-color);
+    font-weight: bold;
+}
+
+.trend-down {
+    color: var(--danger-color);
+    font-weight: bold;
+}
+
+.trend-neutral {
+    color: var(--warning-color);
+}
+
+/* Карточки сигналов */
+.signal-card {
+    border-left: 4px solid;
+    transition: transform 0.2s;
+}
+
+.signal-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 0.5rem 1rem rgba(0,0,0,0.15);
+}
+
+.signal-card.signal-buy {
+    border-left-color: var(--success-color);
+}
+
+.signal-card.signal-sell {
+    border-left-color: var(--danger-color);
+}
+
+.signal-card.signal-neutral {
+    border-left-color: var(--info-color);
+}
+
+/* Статистические карточки */
+.stat-card {
+    transition: transform 0.2s;
+}
+
+.stat-card:hover {
+    transform: scale(1.05);
+}
+
+/* Числа */
+.number-positive {
+    color: var(--success-color);
+}
+
+.number-negative {
+    color: var(--danger-color);
+}
+
+/* Загрузка */
+.loading {
+    text-align: center;
+    padding: 2rem;
+}
+
+.spinner-border {
+    width: 3rem;
+    height: 3rem;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .card-body {
+        padding: 0.75rem;
+    }
+    
+    .table {
+        font-size: 0.875rem;
+    }
+}
+
+/* Анимации */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.fade-in {
+    animation: fadeIn 0.3s ease-in;
+}
+
+/* Прокрутка таблицы */
+.table-responsive {
+    max-height: 600px;
+    overflow-y: auto;
+}
+
+/* Кастомный скроллбар */
+.table-responsive::-webkit-scrollbar {
+    width: 8px;
+}
+
+.table-responsive::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+.table-responsive::-webkit-scrollbar-thumb {
+    background: #888;
+    border-radius: 4px;
+}
+
+.table-responsive::-webkit-scrollbar-thumb:hover {
+    background: #555;
+}
+
+/* Settings Page */
+.nav-tabs .nav-link {
+    color: #495057;
+}
+
+.nav-tabs .nav-link.active {
+    font-weight: bold;
+    background-color: #fff;
+}
+
+.alert {
+    border-left: 4px solid;
+}
+
+.alert-info {
+    border-left-color: #0dcaf0;
+}
+
+.alert-warning {
+    border-left-color: #ffc107;
+}
+
+.alert-success {
+    border-left-color: #198754;
+}
+
+.alert-danger {
+    border-left-color: #dc3545;
+}
+
+/* Position cards */
+.card .card-body {
+    padding: 1rem;
+}
+
+.form-label {
+    font-weight: 500;
+    font-size: 0.875rem;
+    color: #6c757d;
+    margin-bottom: 0.25rem;
+}
+
+/* Smooth transitions */
+input.form-control, select.form-select {
+    transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+}
+
+input.form-control:focus, select.form-select:focus {
+    border-color: #86b7fe;
+    box-shadow: 0 0 0 0.25rem rgba(13, 110, 253, 0.25);
+}
+

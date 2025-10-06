@@ -1,0 +1,12 @@
+{
+  "dividends": {
+    "metadata": {},
+    "columns": ["secid", "isin", "registryclosedate", "value", "currencyid"],
+    "data": [
+      ["SBER", "RU0009029540", "2024-09-20", 34.84, "RUB"],
+      ["SBER", "RU0009029540", "2023-09-22", 28.96, "RUB"],
+      ["SBER", "RU0009029540", "2022-09-23", 25.00, "RUB"]
+    ]
+  }
+}
+

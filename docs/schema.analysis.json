@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Analysis Report Schema",
+  "description": "Схема итогового отчёта по анализу акций",
+  "type": "object",
+  "required": ["generated_at", "universe", "by_symbol"],
+  "properties": {
+    "generated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Дата и время генерации отчёта (ISO 8601)"
+    },
+    "universe": {
+      "type": "array",
+      "description": "Список анализируемых тикеров",
+      "items": {
+        "type": "string"
+      },
+      "minItems": 1
+    },
+    "by_symbol": {
+      "type": "object",
+      "description": "Данные по каждому тикеру",
+      "additionalProperties": {
+        "$ref": "#/definitions/SymbolData"
+      }
+    }
+  },
+  "definitions": {
+    "SymbolData": {
+      "type": "object",
+      "description": "Данные по одному тикеру",
+      "properties": {
+        "price": {
+          "type": ["number", "null"],
+          "description": "Текущая цена",
+          "minimum": 0
+        },
+        "lot": {
+          "type": ["integer", "null"],
+          "description": "Размер лота",
+          "minimum": 1
+        },
+        "div_ttm": {
+          "type": ["number", "null"],
+          "description": "Дивиденды за последние 12 месяцев (TTM)",
+          "minimum": 0
+        },
+        "dy_pct": {
+          "type": ["number", "null"],
+          "description": "Дивидендная доходность в процентах",
+          "minimum": 0
+        },
+        "sma_20": {
+          "type": ["number", "null"],
+          "description": "Простая скользящая средняя за 20 периодов"
+        },
+        "sma_50": {
+          "type": ["number", "null"],
+          "description": "Простая скользящая средняя за 50 периодов"
+        },
+        "sma_200": {
+          "type": ["number", "null"],
+          "description": "Простая скользящая средняя за 200 периодов"
+        },
+        "high_52w": {
+          "type": ["number", "null"],
+          "description": "Максимум за 52 недели",
+          "minimum": 0
+        },
+        "low_52w": {
+          "type": ["number", "null"],
+          "description": "Минимум за 52 недели",
+          "minimum": 0
+        },
+        "dist_52w_low_pct": {
+          "type": ["number", "null"],
+          "description": "Расстояние от минимума 52w в процентах"
+        },
+        "dist_52w_high_pct": {
+          "type": ["number", "null"],
+          "description": "Расстояние до максимума 52w в процентах"
+        },
+        "signals": {
+          "type": "array",
+          "description": "Торговые сигналы",
+          "items": {
+            "type": "string",
+            "enum": [
+              "PRICE_BELOW_SMA200",
+              "PRICE_ABOVE_SMA200",
+              "SMA50_CROSS_UP_SMA200",
+              "SMA50_CROSS_DOWN_SMA200",
+              "DY_GT_TARGET",
+              "VOL_SPIKE",
+              "NEAR_52W_LOW",
+              "NEAR_52W_HIGH"
+            ]
+          }
+        },
+        "meta": {
+          "type": "object",
+          "description": "Метаданные и служебная информация",
+          "properties": {
+            "board": {
+              "type": ["string", "null"],
+              "description": "Режим торгов (TQBR, TQTF и т.д.)"
+            },
+            "error": {
+              "type": ["string", "null"],
+              "description": "Описание ошибки, если данные не получены"
+            },
+            "updated_at": {
+              "type": ["string", "null"],
+              "format": "date-time",
+              "description": "Время последнего обновления данных"
+            }
+          }
+        }
+      }
+    }
+  }
+}
+

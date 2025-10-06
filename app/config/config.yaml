@@ -1,0 +1,49 @@
+base_currency: RUB
+dividend_target_pct: 8
+output:
+  analysis_file: data/analysis.json
+  raw_data_dir: data/raw
+  reports_dir: data/reports
+rate_limit:
+  per_symbol_sleep_sec: 0.4
+schedule:
+  daily_time: '19:10'
+  tz: Europe/Moscow
+universe:
+- market: moex
+  symbol: SBER
+- market: moex
+  symbol: GAZP
+- market: moex
+  symbol: LKOH
+- market: moex
+  symbol: NLMK
+- market: moex
+  symbol: MGNT
+- market: moex
+  symbol: YDEX
+- market: moex
+  symbol: FIVE
+- market: moex
+  symbol: MOEX
+- market: moex
+  symbol: TATN
+- market: moex
+  symbol: GMKN
+- market: moex
+  symbol: ROSN
+- market: moex
+  symbol: VTBR
+- market: moex
+  symbol: AFLT
+- market: moex
+  symbol: MTSS
+- market: moex
+  symbol: SNGS
+- market: moex
+  symbol: X5
+windows:
+  sma:
+  - 20
+  - 50
+  - 200

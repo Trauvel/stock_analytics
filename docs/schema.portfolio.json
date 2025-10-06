@@ -1,0 +1,81 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Portfolio Schema",
+  "description": "Схема пользовательского портфеля",
+  "type": "object",
+  "required": ["currency", "positions"],
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Название портфеля"
+    },
+    "currency": {
+      "type": "string",
+      "description": "Базовая валюта портфеля",
+      "default": "RUB"
+    },
+    "cash": {
+      "type": "number",
+      "description": "Свободные денежные средства",
+      "minimum": 0,
+      "default": 0
+    },
+    "positions": {
+      "type": "array",
+      "description": "Список позиций в портфеле",
+      "items": {
+        "$ref": "#/definitions/Position"
+      }
+    },
+    "created_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Дата создания портфеля"
+    },
+    "updated_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "Дата последнего обновления"
+    }
+  },
+  "definitions": {
+    "Position": {
+      "type": "object",
+      "description": "Позиция в портфеле",
+      "required": ["symbol", "quantity"],
+      "properties": {
+        "symbol": {
+          "type": "string",
+          "description": "Тикер инструмента",
+          "pattern": "^[A-Z0-9]+$"
+        },
+        "quantity": {
+          "type": "integer",
+          "description": "Количество в штуках",
+          "minimum": 0
+        },
+        "avg_price": {
+          "type": "number",
+          "description": "Средняя цена покупки",
+          "minimum": 0
+        },
+        "market": {
+          "type": "string",
+          "description": "Рынок (moex, spb и т.д.)",
+          "default": "moex"
+        },
+        "type": {
+          "type": "string",
+          "description": "Тип инструмента",
+          "enum": ["stock", "bond", "etf", "currency"],
+          "default": "stock"
+        },
+        "notes": {
+          "type": "string",
+          "description": "Заметки о позиции"
+        }
+      }
+    }
+  }
+}
+

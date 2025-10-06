@@ -1,0 +1,33 @@
+# Данные MOEX
+moexalgo>=1.0.0
+
+# Обработка данных
+pandas>=2.0.0
+pandas-ta>=0.3.14b
+numpy>=1.24.0
+
+# API
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+
+# Конфигурация
+python-dotenv>=1.0.0
+pydantic>=2.0.0
+pyyaml>=6.0
+
+# Планировщик
+APScheduler>=3.10.0
+
+# Оптимизация и форматы
+orjson>=3.9.0
+pyarrow>=12.0.0
+
+# Утилиты (опционально)
+tenacity>=8.2.0
+loguru>=0.7.0
+
+# Тестирование
+pytest>=7.4.0
+pytest-asyncio>=0.21.0
+httpx>=0.24.0  # Для TestClient
+

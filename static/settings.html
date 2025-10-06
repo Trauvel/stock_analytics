@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Настройки - Stock Analytics</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <a href="/" class="navbar-brand mb-0 h1">📊 Stock Analytics</a>
+            <div class="d-flex">
+                <a href="/" class="btn btn-sm btn-outline-light">← Назад к дашборду</a>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container mt-4">
+        <h2 class="mb-4">⚙️ Настройки</h2>
+
+        <!-- Вкладки настроек -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#portfolio-settings">
+                    💼 Портфель
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#tickers-settings">
+                    📈 Тикеры
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#params-settings">
+                    🎯 Параметры
+                </button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#scheduler-settings">
+                    ⏰ Планировщик
+                </button>
+            </li>
+        </ul>
+
+        <!-- Содержимое вкладок -->
+        <div class="tab-content mt-3">
+            
+            <!-- Портфель -->
+            <div class="tab-pane fade show active" id="portfolio-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Управление портфелем</h5>
+                    </div>
+                    <div class="card-body">
+                        <!-- Текущий портфель -->
+                        <div id="current-portfolio" class="mb-4">
+                            <h6>Текущий портфель</h6>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Название</label>
+                                    <input type="text" class="form-control" id="portfolio-name" placeholder="Мой портфель">
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Валюта</label>
+                                    <input type="text" class="form-control" id="portfolio-currency" value="RUB" readonly>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Свободные средства</label>
+                                    <input type="number" class="form-control" id="portfolio-cash" value="0">
+                                </div>
+                            </div>
+                            
+                            <h6>Позиции</h6>
+                            <div id="positions-list" class="mb-3"></div>
+                            
+                            <button class="btn btn-primary" onclick="addPosition()">+ Добавить позицию</button>
+                            <button class="btn btn-success" onclick="savePortfolio()">💾 Сохранить портфель</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Тикеры -->
+            <div class="tab-pane fade" id="tickers-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Список отслеживаемых тикеров</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-info">
+                            <strong>ℹ️ Внимание:</strong> После изменения списка тикеров нужно перезапустить сервер.
+                        </div>
+                        
+                        <div class="row mb-3">
+                            <div class="col-md-8">
+                                <input type="text" class="form-control" id="new-ticker" placeholder="Тикер (например SBER)">
+                            </div>
+                            <div class="col-md-4">
+                                <button class="btn btn-primary w-100" onclick="addTicker()">+ Добавить тикер</button>
+                            </div>
+                        </div>
+                        
+                        <div id="tickers-list"></div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Параметры -->
+            <div class="tab-pane fade" id="params-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Параметры анализа</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="mb-3">
+                            <label class="form-label">Целевая дивидендная доходность (%)</label>
+                            <input type="number" class="form-control" id="dividend-target" min="0" max="100" step="0.1">
+                            <small class="text-muted">Порог для сигнала DY_GT_TARGET</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Окна SMA (через запятую)</label>
+                            <input type="text" class="form-control" id="sma-windows" placeholder="20, 50, 200">
+                            <small class="text-muted">Периоды для расчёта скользящих средних</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Пауза между тикерами (секунды)</label>
+                            <input type="number" class="form-control" id="rate-limit" min="0.1" max="5" step="0.1">
+                            <small class="text-muted">Rate limit для MOEX API</small>
+                        </div>
+                        
+                        <button class="btn btn-success" onclick="saveParameters()">💾 Сохранить параметры</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Планировщик -->
+            <div class="tab-pane fade" id="scheduler-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Настройки планировщика</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-warning">
+                            <strong>⚠️ Внимание:</strong> Изменения времени запуска требуют перезапуска сервера.
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Время ежедневного запуска</label>
+                            <input type="time" class="form-control" id="daily-time" value="19:10">
+                            <small class="text-muted">Формат: HH:MM (24-часовой)</small>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <label class="form-label">Временная зона</label>
+                            <select class="form-select" id="timezone">
+                                <option value="Europe/Moscow" selected>Europe/Moscow (МСК)</option>
+                                <option value="Europe/Kaliningrad">Europe/Kaliningrad (МСК-1)</option>
+                                <option value="Asia/Yekaterinburg">Asia/Yekaterinburg (МСК+2)</option>
+                                <option value="Asia/Novosibirsk">Asia/Novosibirsk (МСК+4)</option>
+                                <option value="Asia/Vladivostok">Asia/Vladivostok (МСК+7)</option>
+                            </select>
+                        </div>
+                        
+                        <div class="mb-3">
+                            <h6>Текущий статус</h6>
+                            <div id="scheduler-status-info" class="alert alert-secondary">
+                                Загрузка...
+                            </div>
+                        </div>
+                        
+                        <button class="btn btn-success" onclick="saveScheduler()">💾 Сохранить настройки</button>
+                        <button class="btn btn-info" onclick="loadSchedulerStatus()">🔄 Обновить статус</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="/static/js/settings.js"></script>
+</body>
+</html>
+

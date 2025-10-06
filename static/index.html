@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Stock Analytics - Дашборд</title>
+    
+    <!-- Bootstrap CSS -->
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    
+    <!-- Custom CSS -->
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Navbar -->
+    <nav class="navbar navbar-dark bg-dark">
+        <div class="container-fluid">
+            <span class="navbar-brand mb-0 h1">📊 Stock Analytics</span>
+            <div class="d-flex">
+                <a href="/static/settings.html" class="btn btn-sm btn-outline-light me-2">⚙️ Настройки</a>
+                <button class="btn btn-sm btn-outline-light me-2" onclick="loadReport()">🔄 Обновить</button>
+                <button class="btn btn-sm btn-success" onclick="runJobNow()">▶️ Запустить сейчас</button>
+            </div>
+        </div>
+    </nav>
+
+    <div class="container-fluid mt-4">
+        <!-- Статистика -->
+        <div class="row mb-4">
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Всего тикеров</h6>
+                        <h2 id="total-symbols" class="mb-0">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Успешно</h6>
+                        <h2 id="successful-symbols" class="text-success mb-0">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">С ошибками</h6>
+                        <h2 id="failed-symbols" class="text-danger mb-0">-</h2>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card text-center">
+                    <div class="card-body">
+                        <h6 class="card-subtitle mb-2 text-muted">Всего сигналов</h6>
+                        <h2 id="total-signals" class="text-primary mb-0">-</h2>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Информация об обновлении -->
+        <div class="row mb-3">
+            <div class="col-12">
+                <div class="alert alert-info d-flex justify-content-between align-items-center">
+                    <span>
+                        <strong>Последнее обновление:</strong> <span id="last-update">-</span>
+                    </span>
+                    <span>
+                        <strong>Следующий запуск:</strong> <span id="next-run">19:10 МСК</span>
+                    </span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Вкладки -->
+        <ul class="nav nav-tabs" role="tablist">
+            <li class="nav-item" role="presentation">
+                <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#recommendations" type="button">
+                    🎯 Кратко (Решения)
+                </button>
+            </li>
+            <li class="nav-item" role="presentation">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#detailed" type="button">
+                    📊 Детально
+                </button>
+            </li>
+        </ul>
+
+        <!-- Содержимое вкладок -->
+        <div class="tab-content mt-3">
+            
+            <!-- Кратко: Рекомендации -->
+            <div class="tab-pane fade show active" id="recommendations">
+                <!-- Сводка -->
+                <div class="row mb-3">
+                    <div class="col-md-4">
+                        <div class="card text-center border-success">
+                            <div class="card-body">
+                                <h6 class="text-muted">🟢 Покупать</h6>
+                                <h2 id="buy-count" class="text-success mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card text-center border-secondary">
+                            <div class="card-body">
+                                <h6 class="text-muted">⚪ Держать</h6>
+                                <h2 id="hold-count" class="text-secondary mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="card text-center border-danger">
+                            <div class="card-body">
+                                <h6 class="text-muted">🔴 Продавать</h6>
+                                <h2 id="sell-count" class="text-danger mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Фильтры -->
+                <div class="row mb-3">
+                    <div class="col-12">
+                        <div class="btn-group" role="group">
+                            <button type="button" class="btn btn-outline-primary active" data-filter="all">Все</button>
+                            <button type="button" class="btn btn-outline-success" data-filter="BUY">Покупать</button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="HOLD">Держать</button>
+                            <button type="button" class="btn btn-outline-danger" data-filter="SELL">Продавать</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Список рекомендаций -->
+                <div id="recommendations-list"></div>
+            </div>
+
+            <!-- Детально -->
+            <div class="tab-pane fade" id="detailed">
+                <!-- Подвкладки для детальной информации -->
+                <ul class="nav nav-pills mb-3" role="tablist">
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link active" data-bs-toggle="tab" data-bs-target="#high-dividend" type="button">
+                            💰 Высокие дивиденды
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#all-tickers" type="button">
+                            📋 Все тикеры
+                        </button>
+                    </li>
+                    <li class="nav-item" role="presentation">
+                        <button class="nav-link" data-bs-toggle="tab" data-bs-target="#signals" type="button">
+                            🚦 Сигналы
+                        </button>
+                    </li>
+                </ul>
+
+                <div class="tab-content">
+                    <!-- Высокие дивиденды -->
+                    <div class="tab-pane fade show active" id="high-dividend">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Тикеры с дивидендной доходностью ≥ 8%</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-hover" id="high-div-table">
+                                <thead>
+                                    <tr>
+                                        <th>Тикер</th>
+                                        <th>Цена</th>
+                                        <th>Дивиденды TTM</th>
+                                        <th>DY %</th>
+                                        <th>SMA200</th>
+                                        <th>Тренд</th>
+                                        <th>Сигналы</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="high-div-tbody">
+                                    <tr><td colspan="7" class="text-center">Загрузка...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Все тикеры -->
+            <div class="tab-pane fade" id="all-tickers">
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between align-items-center">
+                        <h5 class="mb-0">Все тикеры</h5>
+                        <input type="text" class="form-control w-25" id="search-ticker" placeholder="Поиск...">
+                    </div>
+                    <div class="card-body">
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover" id="all-tickers-table">
+                                <thead>
+                                    <tr>
+                                        <th>Тикер</th>
+                                        <th>Цена</th>
+                                        <th>Лот</th>
+                                        <th>DY %</th>
+                                        <th>SMA20</th>
+                                        <th>SMA50</th>
+                                        <th>SMA200</th>
+                                        <th>52W Low</th>
+                                        <th>52W High</th>
+                                        <th>Сигналы</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="all-tickers-tbody">
+                                    <tr><td colspan="10" class="text-center">Загрузка...</td></tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Сигналы -->
+            <div class="tab-pane fade" id="signals">
+                <div class="row" id="signals-container">
+                    <div class="col-12">
+                        <p class="text-center">Загрузка...</p>
+                    </div>
+                </div>
+                    </div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+
+    <!-- Bootstrap JS -->
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    
+    <!-- Custom JS -->
+    <script src="/static/js/app.js"></script>
+</body>
+</html>
