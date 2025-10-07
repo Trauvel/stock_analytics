@@ -31,9 +31,15 @@ def load_reco_config(config_path: Optional[str] = None) -> RecoConfig:
         return RecoConfig()
     
     with open(config_path, 'r', encoding='utf-8') as f:
-        data = yaml.safe_load(f)
+        yaml_data = yaml.safe_load(f)
     
-    return RecoConfig(**data)
+    # Обрабатываем event_predictor
+    if 'event_predictor' in yaml_data:
+        ep_config = yaml_data.pop('event_predictor')
+        yaml_data['event_predictor_enabled'] = ep_config.get('enabled', True)
+        yaml_data['event_predictor_weights'] = ep_config.get('weight', {})
+    
+    return RecoConfig(**yaml_data)
 
 
 def get_reco_config() -> RecoConfig:

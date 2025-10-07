@@ -60,6 +60,19 @@ class RecoConfig:
     # Дополнительные параметры
     near_52w_low_threshold: float = 0.3  # нижняя треть диапазона
     near_52w_high_threshold: float = 0.9  # верхняя граница диапазона
+    
+    # Модуль предсказания событий
+    event_predictor_enabled: bool = True
+    event_predictor_weights: dict = None
+    
+    def __post_init__(self):
+        if self.event_predictor_weights is None:
+            self.event_predictor_weights = {
+                'HIGH_PROBABILITY': 1.5,
+                'MEDIUM_PROBABILITY': 0.5,
+                'NEGATIVE_SIGNAL': -1.0,
+                'LOW': 0.0
+            }
 
 
 @dataclass

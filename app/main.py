@@ -5,11 +5,12 @@ import signal
 from contextlib import asynccontextmanager
 
 from pathlib import Path
-from fastapi import FastAPI
+from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import uvicorn
+from typing import Optional, List
 
 from app.api.server import app as api_app
 from app.scheduler.daily_job import DailyJobScheduler
@@ -137,6 +138,100 @@ async def run_job_now():
         }
     except Exception as e:
         logger.error(f"Error running job manually: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+# === Модуль предсказаний (без префикса /api) ===
+
+@app.get("/predictor/signal")
+async def get_predictor_signal(tickers: Optional[List[str]] = Query(default=None)):
+    """Получить сигнал предсказания событий."""
+    try:
+        from app.predictor import generate_event_signals
+        from app.config.loader import get_config
+        
+        if not tickers:
+            config = get_config()
+            tickers = [t.symbol for t in config.universe[:5]]
+        
+        signal = await generate_event_signals(target_companies=tickers)
+        
+        return {
+            "ok": True,
+            "data": signal
+        }
+    except Exception as e:
+        logger.error(f"Error generating event signal: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+@app.get("/predictor/history")
+async def get_predictor_history(limit: int = 10):
+    """Получить историю сигналов предсказаний."""
+    try:
+        import json
+        from pathlib import Path
+        
+        history_file = Path("data/events_history.json")
+        
+        if not history_file.exists():
+            return {
+                "ok": True,
+                "data": {
+                    "items": [],
+                    "count": 0
+                }
+            }
+        
+        with open(history_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+        
+        recent = history[-limit:] if len(history) > limit else history
+        recent.reverse()
+        
+        return {
+            "ok": True,
+            "data": {
+                "items": recent,
+                "count": len(recent),
+                "total": len(history)
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting event history: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+@app.get("/predictor/config")
+async def get_predictor_config():
+    """Получить конфигурацию модуля предсказаний."""
+    try:
+        from app.predictor.config import PredictorConfig
+        
+        config = PredictorConfig.load()
+        
+        return {
+            "ok": True,
+            "data": {
+                "news_sources": config.news_sources,
+                "use_vacancies": config.use_vacancies,
+                "positive_keywords": config.positive_keywords[:10],
+                "negative_keywords": config.negative_keywords[:10],
+                "cache_ttl": config.cache_ttl,
+                "events_log_path": config.events_log_path
+            }
+        }
+    except Exception as e:
+        logger.error(f"Error getting predictor config: {e}")
         return {
             "ok": False,
             "error": str(e)

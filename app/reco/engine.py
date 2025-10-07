@@ -1,7 +1,52 @@
 """Движок правил для генерации рекомендаций."""
 
-from typing import Optional
+from typing import Optional, Dict
 from .models import TickerSnapshot, RecoConfig, Recommendation
+import asyncio
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+async def get_event_signal_async(ticker: str) -> Optional[Dict]:
+    """
+    Получение сигнала от модуля предсказаний (асинхронно).
+    
+    Args:
+        ticker: Тикер для анализа
+        
+    Returns:
+        Словарь с сигналом или None в случае ошибки
+    """
+    try:
+        from app.predictor import generate_event_signals
+        signal = await generate_event_signals(target_companies=[ticker])
+        return signal
+    except Exception as e:
+        logger.warning(f"Не удалось получить сигнал предсказаний для {ticker}: {e}")
+        return None
+
+
+def get_event_signal(ticker: str) -> Optional[Dict]:
+    """
+    Получение сигнала от модуля предсказаний (синхронная обёртка).
+    
+    Args:
+        ticker: Тикер для анализа
+        
+    Returns:
+        Словарь с сигналом или None
+    """
+    try:
+        loop = asyncio.get_event_loop()
+        if loop.is_running():
+            # Если цикл уже работает, создаём задачу
+            return None  # В этом случае используйте get_event_signal_async
+        else:
+            return loop.run_until_complete(get_event_signal_async(ticker))
+    except Exception as e:
+        logger.warning(f"Ошибка при получении сигнала: {e}")
+        return None
 
 
 def pct_diff(current: Optional[float], reference: Optional[float]) -> float:
@@ -11,13 +56,18 @@ def pct_diff(current: Optional[float], reference: Optional[float]) -> float:
     return (current - reference) / reference * 100.0
 
 
-def make_reco(snapshot: TickerSnapshot, config: RecoConfig) -> Recommendation:
+def make_reco(
+    snapshot: TickerSnapshot, 
+    config: RecoConfig,
+    event_signal: Optional[Dict] = None
+) -> Recommendation:
     """
     Генерирует рекомендацию на основе правил и scoring.
     
     Args:
         snapshot: Снимок данных по тикеру
         config: Конфигурация порогов
+        event_signal: Опциональный сигнал от модуля предсказаний
         
     Returns:
         Recommendation: Рекомендация с действием и обоснованием
@@ -25,6 +75,26 @@ def make_reco(snapshot: TickerSnapshot, config: RecoConfig) -> Recommendation:
     score = 0.0
     reasons = []
     confidence_factors = []
+    
+    # === 0. Анализ модуля предсказания событий ===
+    if event_signal and config.event_predictor_enabled:
+        signal_level = event_signal.get('signal_level', 'LOW')
+        weights = config.event_predictor_weights
+        
+        if signal_level in weights:
+            weight = weights[signal_level]
+            if weight != 0:
+                score += weight
+                
+                if signal_level == 'HIGH_PROBABILITY':
+                    reasons.append(f"🔮 {event_signal.get('reason', 'Высокая вероятность позитивных событий')}")
+                    confidence_factors.append(1.0)
+                elif signal_level == 'MEDIUM_PROBABILITY':
+                    reasons.append(f"🔮 {event_signal.get('reason', 'Умеренно позитивный новостной фон')}")
+                    confidence_factors.append(0.5)
+                elif signal_level == 'NEGATIVE_SIGNAL':
+                    reasons.append(f"⚠️ {event_signal.get('reason', 'Негативный новостной фон')}")
+                    confidence_factors.append(1.0)
     
     # === 1. Анализ дивидендов ===
     if snapshot.dy_pct is not None:

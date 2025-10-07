@@ -1,0 +1,75 @@
+# Конфигурация модуля предсказания новостных всплесков
+
+# Источники RSS новостей
+news_sources:
+  # Основные деловые СМИ
+  - https://www.interfax.ru/rss.asp
+  - https://www.rbc.ru/rss/
+  - https://www.kommersant.ru/RSS/news.xml
+  - https://www.vedomosti.ru/rss
+  - https://tass.ru/rss
+  
+  # Общие новостные агентства
+  - https://ria.ru/export/rss2/
+  - https://lenta.ru/rss
+  - https://www.gazeta.ru/export/rss2/news.xml
+  
+  # Финансовые и биржевые источники
+  - https://www.finmarket.ru/rss
+  - https://www.moex.com/ru/rss/
+  - https://www.investing.com/rss
+
+# Использовать API вакансий (hh.ru)
+use_vacancies: true
+
+# Позитивные ключевые слова (индикаторы роста)
+positive_keywords:
+  - запуск
+  - запущен
+  - фьючерс
+  - опцион
+  - новая секция
+  - развитие продукта
+  - тестирование платформы
+  - лицензия
+  - расширение торгов
+  - API
+  - инновация
+  - партнёрство
+  - открытие
+  - прибыль
+  - рост
+  - успешно
+  - одобрен
+  - новый продукт
+
+# Негативные ключевые слова (индикаторы рисков)
+negative_keywords:
+  - расследование
+  - приостановка
+  - санкции
+  - убытки
+  - падение
+  - кризис
+  - банкротство
+  - штраф
+  - скандал
+  - закрыт
+  - отменён
+  - приостановлен
+
+# Настройки кэширования (в секундах)
+cache_ttl: 3600
+
+# Путь к файлу истории событий
+events_log_path: data/events_history.json
+
+# Уровень логирования (DEBUG, INFO, WARNING, ERROR)
+log_level: INFO
+
+# Путь к файлу логов
+log_file: data/logs/predictor.log
+
+# Ограничение запросов к API (в минуту)
+requests_per_minute: 10
+

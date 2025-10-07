@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from loguru import logger
+import asyncio
 
 from app.config.loader import get_config
 from app.store.io import (
@@ -72,7 +73,22 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-@app.get("/", response_model=MessageResponse)
+@app.get("/", response_class=HTMLResponse)
+async def root():
+    """Редирект на главную страницу."""
+    return """
+    <!DOCTYPE html>
+    <html>
+    <head>
+        <meta http-equiv="refresh" content="0; url=/static/index.html" />
+    </head>
+    <body>
+        <p>Redirecting to <a href="/static/index.html">dashboard</a>...</p>
+    </body>
+    </html>
+    """
+
+@app.get("/api", response_model=MessageResponse)
 async def api_root():
     """API корневой эндпоинт."""
     return MessageResponse(
@@ -548,6 +564,130 @@ async def get_portfolio_data():
         )
 
 
+# === Модуль предсказаний ===
+
+@app.get("/predictor/signal")
+async def get_event_signal_api(
+    tickers: Optional[List[str]] = Query(default=None, description="Список тикеров для анализа")
+):
+    """
+    Получить сигнал предсказания событий для указанных тикеров.
+    
+    Args:
+        tickers: Список тикеров для анализа
+        
+    Returns:
+        Dict: Сигнал предсказания с уровнем и обоснованием
+    """
+    try:
+        from app.predictor import generate_event_signals
+        
+        # Если тикеры не указаны, используем все из конфига
+        if not tickers:
+            config = get_config()
+            tickers = [t.symbol for t in config.universe[:5]]  # Первые 5 для быстроты
+        
+        # Генерируем сигнал
+        signal = await generate_event_signals(target_companies=tickers)
+        
+        logger.info(f"Generated event signal for {len(tickers)} tickers: {signal['signal_level']}")
+        
+        return {
+            "ok": True,
+            "data": signal
+        }
+        
+    except Exception as e:
+        logger.error(f"Error generating event signal: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+@app.get("/predictor/history")
+async def get_event_history_api(limit: int = 10):
+    """
+    Получить историю событийных сигналов.
+    
+    Args:
+        limit: Максимальное количество записей
+        
+    Returns:
+        Dict: История сигналов
+    """
+    try:
+        import json
+        from pathlib import Path
+        
+        history_file = Path("data/events_history.json")
+        
+        if not history_file.exists():
+            return {
+                "ok": True,
+                "data": {
+                    "items": [],
+                    "count": 0
+                }
+            }
+        
+        with open(history_file, 'r', encoding='utf-8') as f:
+            history = json.load(f)
+        
+        # Возвращаем последние N записей
+        recent = history[-limit:] if len(history) > limit else history
+        recent.reverse()  # Новые сверху
+        
+        return {
+            "ok": True,
+            "data": {
+                "items": recent,
+                "count": len(recent),
+                "total": len(history)
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting event history: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
+@app.get("/predictor/config")
+async def get_predictor_config_api():
+    """
+    Получить конфигурацию модуля предсказаний.
+    
+    Returns:
+        Dict: Конфигурация predictor
+    """
+    try:
+        from app.predictor.config import PredictorConfig
+        
+        config = PredictorConfig.load()
+        
+        return {
+            "ok": True,
+            "data": {
+                "news_sources": config.news_sources,
+                "use_vacancies": config.use_vacancies,
+                "positive_keywords": config.positive_keywords[:10],  # Топ 10
+                "negative_keywords": config.negative_keywords[:10],
+                "cache_ttl": config.cache_ttl,
+                "events_log_path": config.events_log_path
+            }
+        }
+        
+    except Exception as e:
+        logger.error(f"Error getting predictor config: {e}")
+        return {
+            "ok": False,
+            "error": str(e)
+        }
+
+
 @app.get("/report/summary")
 async def get_report_summary():
     """
@@ -629,6 +769,14 @@ async def global_exception_handler(request, exc):
             "detail": str(exc)
         }
     )
+
+
+# Монтируем статические файлы (ВАЖНО: в самом конце, после всех routes!)
+project_root = Path(__file__).parent.parent.parent
+static_path = project_root / "static"
+if static_path.exists():
+    app.mount("/static", StaticFiles(directory=str(static_path)), name="static")
+    logger.info(f"Mounted static files from {static_path}")
 
 
 if __name__ == "__main__":
