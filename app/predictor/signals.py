@@ -10,6 +10,7 @@ from pathlib import Path
 
 from .collector import NewsCollector
 from .analyzer import NewsAnalyzer
+from .llm_analyzer import LLMNewsAnalyzer
 from .config import PredictorConfig
 
 logger = logging.getLogger(__name__)
@@ -28,6 +29,16 @@ class EventSignalGenerator:
             positive_keywords=config.positive_keywords,
             negative_keywords=config.negative_keywords
         )
+        
+        # LLM анализатор (если включен)
+        self.llm_analyzer = None
+        if config.llm_enabled:
+            self.llm_analyzer = LLMNewsAnalyzer(
+                use_llm_for=config.llm_use_for,
+                confidence_threshold=config.llm_confidence_threshold,
+                timeout=config.llm_timeout
+            )
+        
         self.history_file = Path(config.events_log_path)
         
     def _calculate_signal_level(self, stats: Dict) -> str:
@@ -105,6 +116,11 @@ class EventSignalGenerator:
         """
         logger.info("Начинаем генерацию сигнала предсказания...")
         
+        # Инициализируем LLM если включен
+        if self.llm_analyzer:
+            await self.llm_analyzer.initialize(warmup=self.config.llm_warmup)
+            logger.info(f"LLM доступен: {self.llm_analyzer.is_available}")
+        
         # Собираем данные
         vacancy_queries = None
         if target_companies and self.config.use_vacancies:
@@ -118,11 +134,24 @@ class EventSignalGenerator:
                 'signal_level': 'LOW',
                 'reason': 'Нет данных для анализа',
                 'timestamp': datetime.now().isoformat(),
-                'stats': {}
+                'stats': {},
+                'llm_used': False
             }
         
-        # Анализируем данные
-        analyzed = self.analyzer.analyze_batch(items, target_companies)
+        # Анализируем данные (keyword analysis)
+        keyword_analyzed = self.analyzer.analyze_batch(items, target_companies)
+        
+        # Дополнительный анализ через LLM (если включен)
+        if self.llm_analyzer and self.llm_analyzer.is_available:
+            logger.info("Запускаем LLM анализ...")
+            analyzed = await self.llm_analyzer.analyze_batch(
+                items, 
+                keyword_analyzed,
+                target_companies
+            )
+        else:
+            analyzed = keyword_analyzed
+        
         stats = self.analyzer.get_summary_stats(analyzed)
         
         # Определяем уровень сигнала

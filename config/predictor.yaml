@@ -1,23 +1,16 @@
 # Конфигурация модуля предсказания новостных всплесков
 
-# Источники RSS новостей
+# Источники RSS новостей (проверенные работающие)
 news_sources:
   # Основные деловые СМИ
   - https://www.interfax.ru/rss.asp
-  - https://www.rbc.ru/rss/
   - https://www.kommersant.ru/RSS/news.xml
-  - https://www.vedomosti.ru/rss
-  - https://tass.ru/rss
-  
-  # Общие новостные агентства
-  - https://ria.ru/export/rss2/
   - https://lenta.ru/rss
-  - https://www.gazeta.ru/export/rss2/news.xml
   
-  # Финансовые и биржевые источники
-  - https://www.finmarket.ru/rss
-  - https://www.moex.com/ru/rss/
-  - https://www.investing.com/rss
+  # Альтернативные источники (если основные не работают, раскомментируйте):
+  # - https://1prime.ru/export/rss2/index.xml
+  # - https://quote.rbc.ru/news/rss/
+  # - https://news.yandex.ru/index.rss
 
 # Использовать API вакансий (hh.ru)
 use_vacancies: true
@@ -72,4 +65,22 @@ log_file: data/logs/predictor.log
 
 # Ограничение запросов к API (в минуту)
 requests_per_minute: 10
+
+# === LLM (локальная нейронка) для глубокого анализа ===
+llm:
+  enabled: true  # true чтобы включить (сначала установите Ollama!)
+  provider: ollama  # ollama, openai, localai (можно добавить свой)
+  model: mistral  # mistral, qwen2.5:7b, llama3.1:8b
+  base_url: http://localhost:11434
+  
+  # Когда использовать LLM:
+  # - "all" = для всех новостей (медленно, но точно)
+  # - "relevant_only" = только для релевантных (рекомендуется)
+  # - "uncertain" = только для неоднозначных
+  use_for: relevant_only
+  
+  # Настройки производительности
+  timeout: 30  # Максимум секунд на анализ одной новости (первый запрос медленный!)
+  confidence_threshold: 0.3  # Порог для "uncertain" режима
+  warmup: true  # Прогрев модели при старте
 

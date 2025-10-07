@@ -51,6 +51,16 @@ class PredictorConfig:
     # Rate limiting для API
     requests_per_minute: int = 10
     
+    # === LLM настройки ===
+    llm_enabled: bool = False
+    llm_provider: str = "ollama"  # ollama, openai, localai
+    llm_model: str = "mistral"
+    llm_base_url: str = "http://localhost:11434"
+    llm_use_for: str = "relevant_only"  # all, relevant_only, uncertain
+    llm_timeout: int = 30
+    llm_confidence_threshold: float = 0.3
+    llm_warmup: bool = True
+    
     @classmethod
     def load(cls, config_path: Optional[str] = None) -> 'PredictorConfig':
         """
@@ -83,18 +93,34 @@ class PredictorConfig:
                 logger.warning("Пустой файл конфигурации. Используем дефолтные настройки.")
                 return cls()
             
+            # Обрабатываем вложенный llm блок
+            llm_config = data.get('llm', {})
+            
             # Создаём экземпляр с данными из файла
-            return cls(
-                news_sources=data.get('news_sources', cls.news_sources),
-                use_vacancies=data.get('use_vacancies', cls.use_vacancies),
-                positive_keywords=data.get('positive_keywords', cls.positive_keywords),
-                negative_keywords=data.get('negative_keywords', cls.negative_keywords),
-                cache_ttl=data.get('cache_ttl', cls.cache_ttl),
-                events_log_path=data.get('events_log_path', cls.events_log_path),
-                log_level=data.get('log_level', cls.log_level),
-                log_file=data.get('log_file', cls.log_file),
-                requests_per_minute=data.get('requests_per_minute', cls.requests_per_minute),
-            )
+            config = cls()
+            
+            # Обновляем базовые настройки
+            config.news_sources = data.get('news_sources', config.news_sources)
+            config.use_vacancies = data.get('use_vacancies', config.use_vacancies)
+            config.positive_keywords = data.get('positive_keywords', config.positive_keywords)
+            config.negative_keywords = data.get('negative_keywords', config.negative_keywords)
+            config.cache_ttl = data.get('cache_ttl', config.cache_ttl)
+            config.events_log_path = data.get('events_log_path', config.events_log_path)
+            config.log_level = data.get('log_level', config.log_level)
+            config.log_file = data.get('log_file', config.log_file)
+            config.requests_per_minute = data.get('requests_per_minute', config.requests_per_minute)
+            
+            # Обновляем LLM настройки
+            config.llm_enabled = llm_config.get('enabled', config.llm_enabled)
+            config.llm_provider = llm_config.get('provider', config.llm_provider)
+            config.llm_model = llm_config.get('model', config.llm_model)
+            config.llm_base_url = llm_config.get('base_url', config.llm_base_url)
+            config.llm_use_for = llm_config.get('use_for', config.llm_use_for)
+            config.llm_timeout = llm_config.get('timeout', config.llm_timeout)
+            config.llm_confidence_threshold = llm_config.get('confidence_threshold', config.llm_confidence_threshold)
+            config.llm_warmup = llm_config.get('warmup', config.llm_warmup)
+            
+            return config
             
         except Exception as e:
             logger.error(f"Ошибка при загрузке конфигурации: {e}")
