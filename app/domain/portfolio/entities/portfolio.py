@@ -184,6 +184,7 @@ class Portfolio:
             raise ValueError(f"Position {symbol} not found in portfolio")
         
         new_portfolio = Portfolio(
+            id=self.id,
             name=self.name,
             currency=self.currency,
             cash=self.cash,

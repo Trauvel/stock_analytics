@@ -40,7 +40,9 @@ class ImportSberHTMLUseCase:
         Returns:
             Portfolio: Импортированный/обновлённый портфель
         """
-        logger.info(f"Importing portfolio from Sber HTML: {html_file_path} (portfolio_id: {portfolio_id})")
+        # Целевой портфель: всегда используем конкретный ID, никогда None
+        lookup_id = (portfolio_id or "").strip() or "default"
+        logger.info(f"Sber import: portfolio_id received={repr(portfolio_id)}, lookup_id={lookup_id}")
         
         # Парсим HTML
         positions_data = parse_sber_html(html_file_path)
@@ -61,47 +63,47 @@ class ImportSberHTMLUseCase:
                 logger.warning(f"Error creating position from {pos_data}: {e}")
                 continue
         
-        # Создаём или обновляем портфель
+        # Создаём или обновляем портфель (всегда по lookup_id — актуализация выбранного)
         if merge_with_existing:
-            existing_portfolio = await self._portfolio_repo.get(portfolio_id)
+            existing_portfolio = await self._portfolio_repo.get(lookup_id)
             
             if existing_portfolio:
-                # Объединяем с существующим
+                logger.info(f"Sber import: MERGE into existing portfolio {lookup_id}")
                 portfolio = existing_portfolio
                 
-                # Обновляем кеш
                 if cash_amount > 0:
                     portfolio = portfolio.update_cash(cash)
                 
-                # Добавляем/обновляем позиции
                 for new_position in positions:
                     existing_pos = portfolio.get_position(new_position.symbol)
                     if existing_pos:
-                        # Если позиция уже есть, обновляем количество и цену
-                        # (просто заменяем на новую)
                         portfolio = portfolio.remove_position(new_position.symbol)
-                    
                     portfolio = portfolio.add_position(new_position)
             else:
-                # Создаём новый портфель
+                logger.warning(f"Sber import: CREATE portfolio {lookup_id} (existing not found, merge=True)")
                 portfolio = Portfolio(
-                    id=portfolio_id,  # Сохраняем ID если указан
+                    id=lookup_id,
                     name="Импортированный из Сбера",
                     currency=currency,
                     cash=cash,
                     positions=positions
                 )
         else:
-            # Создаём новый портфель (заменяем существующий)
+            logger.info(f"Sber import: REPLACE portfolio {lookup_id}")
             portfolio = Portfolio(
-                id=portfolio_id,  # Сохраняем ID если указан
+                id=lookup_id,
                 name="Импортированный из Сбера",
                 currency=currency,
                 cash=cash,
                 positions=positions
             )
         
-        # Сохраняем
+        # Защита: никогда не сохранять без id (иначе репозиторий сгенерирует новый UUID)
+        if not portfolio.id or not str(portfolio.id).strip():
+            logger.warning(f"Sber import: portfolio.id was missing/empty, forcing lookup_id={lookup_id}")
+            portfolio.id = lookup_id
+        
+        logger.info(f"Sber import: saving portfolio id={portfolio.id}")
         await self._portfolio_repo.save(portfolio)
         
         logger.info(f"Imported {len(positions)} positions, cash: {cash_amount:.2f} {currency.code}")

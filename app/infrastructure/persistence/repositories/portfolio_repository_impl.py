@@ -162,10 +162,14 @@ class PortfolioRepositoryImpl(PortfolioRepository):
             Сохранённый портфель с обновлённым ID (если был создан новый)
         """
         try:
-            # Если у портфеля нет ID, генерируем новый
-            if not portfolio.id:
-                portfolio.id = self._generate_id()
-                logger.info(f"Generated new portfolio ID: {portfolio.id}")
+            # Если у портфеля нет ID, генерируем новый (иначе появится "новый" портфель в списке)
+            if not portfolio.id or not str(portfolio.id).strip():
+                generated = self._generate_id()
+                logger.warning(
+                    f"Repo: portfolio.id missing or empty, generated NEW id={generated}. "
+                    "Import should always pass lookup_id — check use case."
+                )
+                portfolio.id = generated
             
             portfolio_id = portfolio.id
             
@@ -182,6 +186,7 @@ class PortfolioRepositoryImpl(PortfolioRepository):
                 index["ids"] = []
             
             if portfolio_id not in index["ids"]:
+                logger.info(f"Repo: adding NEW portfolio to index: id={portfolio_id}")
                 index["ids"].append(portfolio_id)
                 index[portfolio_id] = {
                     "name": portfolio.name or f"Портфель {portfolio_id[:8]}",
@@ -189,7 +194,7 @@ class PortfolioRepositoryImpl(PortfolioRepository):
                     "updated_at": portfolio.updated_at.isoformat() if portfolio.updated_at else None
                 }
             else:
-                # Обновляем метаданные
+                # Обновляем метаданные (актуализация существующего)
                 index[portfolio_id]["name"] = portfolio.name or f"Портфель {portfolio_id[:8]}"
                 index[portfolio_id]["updated_at"] = portfolio.updated_at.isoformat() if portfolio.updated_at else None
             

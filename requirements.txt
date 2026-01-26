@@ -3,8 +3,10 @@ moexalgo>=1.0.0
 
 # Обработка данных
 pandas>=2.0.0
-pandas-ta>=0.3.14b
 numpy>=1.24.0
+# pandas-ta: версии 0.3.x сняты с PyPI. Требует Python >=3.12.
+# Для Python 3.10/3.11 используйте: pandas-ta-classic>=0.3.59
+pandas-ta>=0.4.67b0
 
 # API
 fastapi>=0.100.0

@@ -36,17 +36,16 @@ async function loadPortfoliosList() {
                 const option = document.createElement('option');
                 option.value = portfolio.id;
                 option.textContent = `${portfolio.name || `Портфель ${portfolio.id.substring(0, 8)}`} (${portfolio.positions_count} позиций)`;
-                if (portfolio.id === currentPortfolioId) {
-                    option.selected = true;
-                }
                 select.appendChild(option);
             });
             
-            // Если есть портфели и не выбран текущий, выбираем первый
+            // Явно выставляем выбранный портфель (иначе select.value может остаться "")
             if (portfoliosList.length > 0 && !currentPortfolioId) {
                 currentPortfolioId = portfoliosList[0].id;
-                select.value = currentPortfolioId;
                 await loadPortfolio(currentPortfolioId);
+            }
+            if (currentPortfolioId && portfoliosList.some(p => p.id === currentPortfolioId)) {
+                select.value = currentPortfolioId;
             }
         } else {
             console.warn('No portfolios found');
@@ -323,10 +322,24 @@ async function importFromSber() {
         return;
     }
     
+    const select = document.getElementById('portfolio-select');
+    const rawVal = select ? String(select.value || '').trim() : '';
+    if (!rawVal) {
+        const msg = 'Выберите портфель в списке выше перед импортом. Импорт всегда идёт в выбранный портфель.';
+        if (statusDiv) {
+            statusDiv.innerHTML = `<div class="alert alert-warning">⚠️ ${msg}</div>`;
+        } else {
+            alert(msg);
+        }
+        console.warn('Import blocked: no portfolio selected. select.value=', select?.value);
+        return;
+    }
+    
     const file = fileInput.files[0];
     const merge = mergeCheckbox ? mergeCheckbox.checked : true;
+    const targetId = rawVal;
     
-    console.log('File selected:', file.name, 'Merge:', merge);
+    console.log('File selected:', file.name, 'Merge:', merge, 'portfolio_id:', targetId);
     
     try {
         if (statusDiv) {
@@ -336,11 +349,9 @@ async function importFromSber() {
         const formData = new FormData();
         formData.append('file', file);
         formData.append('merge', merge.toString());
-        if (currentPortfolioId) {
-            formData.append('portfolio_id', currentPortfolioId);
-        }
+        formData.append('portfolio_id', targetId);
         
-        console.log('Sending request to /api/portfolio/import/sber-html');
+        console.log('Sending request to /api/portfolio/import/sber-html', { portfolio_id: targetId });
         
         const response = await fetch('/api/portfolio/import/sber-html', {
             method: 'POST',
@@ -364,10 +375,10 @@ async function importFromSber() {
             } else {
                 alert(`✅ ${data.message}`);
             }
-            // Перезагружаем портфель
+            // Перезагружаем портфель по тому же ID, что импортировали
             setTimeout(async () => {
                 if (typeof loadPortfolio === 'function') {
-                    await loadPortfolio(currentPortfolioId);
+                    await loadPortfolio(targetId);
                     await loadPortfoliosList();
                 }
             }, 1000);

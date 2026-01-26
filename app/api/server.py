@@ -676,7 +676,7 @@ async def import_portfolio_from_sber_html(
         from pathlib import Path
         import tempfile
         
-        logger.info(f"Importing portfolio from Sber HTML file: {file.filename} (portfolio_id: {portfolio_id})")
+        logger.info(f"Sber import API: file={file.filename} portfolio_id={repr(portfolio_id)} merge={merge}")
         
         # Сохраняем загруженный файл во временную директорию
         with tempfile.NamedTemporaryFile(delete=False, suffix='.html', mode='wb') as tmp_file:
@@ -694,7 +694,7 @@ async def import_portfolio_from_sber_html(
             
             return MessageResponse(
                 ok=True,
-                message=f"Импортировано {len(portfolio.positions)} позиций, кеш: {portfolio.cash.amount:.2f} {portfolio.currency.code}"
+                message=f"Импортировано {len(portfolio.positions)} позиций, кеш: {portfolio.cash.amount:.2f} {portfolio.currency.code}. Портфель: {portfolio.id}"
             )
         finally:
             # Удаляем временный файл
