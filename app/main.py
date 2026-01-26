@@ -1,15 +1,19 @@
 """Главный модуль приложения с интеграцией API и планировщика."""
 
+import base64
+import os
 import sys
 import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import uvicorn
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
 from typing import Optional, List
 from dotenv import load_dotenv
 
@@ -19,10 +23,10 @@ from app.scheduler.frequent_updates_job import FrequentUpdatesScheduler
 from app.infrastructure.persistence.repositories.price_history_repository_impl import PriceHistoryRepositoryImpl
 from app.application.dependencies import container
 
-# Загружаем переменные окружения из .env файла
+# Загружаем переменные окружения из .env файла (UTF-8)
 env_path = Path(__file__).parent.parent / ".env"
 if env_path.exists():
-    load_dotenv(env_path, override=False)
+    load_dotenv(env_path, override=False, encoding="utf-8")
     logger.info(f"Loaded environment variables from {env_path}")
 else:
     logger.warning(f".env file not found at {env_path}")
@@ -106,6 +110,87 @@ app = FastAPI(
     version="0.1.0",
     lifespan=lifespan
 )
+
+
+def _dashboard_auth_enabled() -> bool:
+    """Проверяет, включена ли защита дашборда паролем."""
+    return bool(os.getenv("DASHBOARD_PASSWORD", "").strip())
+
+
+def _is_protected_path(path: str) -> bool:
+    """Пути, требующие авторизации."""
+    if path == "/" or path == "":
+        return True
+    for prefix in ("/static", "/api", "/scheduler", "/predictor"):
+        if path == prefix or path.startswith(prefix + "/"):
+            return True
+    return False
+
+
+class DashboardBasicAuthMiddleware(BaseHTTPMiddleware):
+    """HTTP Basic Auth для дашборда и API по паролю из DASHBOARD_PASSWORD."""
+
+    def __init__(self, app, expected_user: str, expected_password: str):
+        super().__init__(app)
+        self.expected_user = expected_user
+        self.expected_password = expected_password
+
+    async def dispatch(self, request: Request, call_next):
+        if not _dashboard_auth_enabled():
+            return await call_next(request)
+
+        path = request.url.path
+        if not _is_protected_path(path):
+            return await call_next(request)
+
+        if request.method == "OPTIONS":
+            return await call_next(request)
+
+        auth = request.headers.get("Authorization")
+        if not auth or not auth.lower().startswith("basic "):
+            return PlainTextResponse(
+                "Unauthorized",
+                status_code=401,
+                headers={"WWW-Authenticate": "Basic realm=\"Dashboard\""},
+            )
+
+        try:
+            decoded = base64.b64decode(auth[6:].strip()).decode("utf-8")
+            user, _, password = decoded.partition(":")
+            user = user.strip()
+            password = password.strip()
+            if user == self.expected_user and password == self.expected_password:
+                return await call_next(request)
+            # Диагностика при несовпадении (без вывода самих паролей)
+            first_exp = ord(self.expected_password[0]) if self.expected_password else None
+            first_recv = ord(password[0]) if password else None
+            logger.warning(
+                f"Dashboard auth failed: expected_user={self.expected_user!r}, "
+                f"received_user={user!r}, expected_password_len={len(self.expected_password)}, "
+                f"received_password_len={len(password)}, "
+                f"first_char_expected_ord={first_exp}, first_char_received_ord={first_recv}"
+            )
+        except Exception as e:
+            logger.warning(f"Dashboard auth error (decode/compare): {e}")
+
+        return PlainTextResponse(
+            "Unauthorized",
+            status_code=401,
+            headers={"WWW-Authenticate": "Basic realm=\"Dashboard\""},
+        )
+
+
+_dashboard_user = os.getenv("DASHBOARD_USER", "dashboard").strip() or "dashboard"
+_dashboard_password = os.getenv("DASHBOARD_PASSWORD", "").strip()
+if _dashboard_auth_enabled():
+    app.add_middleware(
+        DashboardBasicAuthMiddleware,
+        expected_user=_dashboard_user,
+        expected_password=_dashboard_password,
+    )
+    logger.info("Dashboard Basic Auth enabled (DASHBOARD_PASSWORD from .env)")
+else:
+    logger.info("Dashboard auth disabled (DASHBOARD_PASSWORD not set)")
 
 # Подключаем статические файлы для GUI
 try:
