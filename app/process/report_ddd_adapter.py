@@ -1,7 +1,7 @@
 """Адаптер для совместимости старого ReportGenerator с новым DDD Use Case."""
 
 import asyncio
-from typing import Dict, Any
+from typing import Dict, Any, List, Optional
 from loguru import logger
 
 from app.application.dependencies import container
@@ -28,7 +28,8 @@ class ReportGeneratorDDDAdapter:
         self,
         save_daily: bool = True,
         include_portfolio: bool = True,
-        instrument_type: str = "all"
+        instrument_type: str = "all",
+        selected_bonds: Optional[List[str]] = None
     ) -> Dict[str, Any]:
         """
         Сгенерировать отчёт и сохранить его (совместимость со старым API).
@@ -37,6 +38,7 @@ class ReportGeneratorDDDAdapter:
             save_daily: Сохранить ли копию в daily reports
             include_portfolio: Включить ли тикеры из портфеля
             instrument_type: Тип инструментов для анализа (all, stocks, bonds)
+            selected_bonds: Список выбранных облигаций (только для instrument_type=bonds)
             
         Returns:
             Dict[str, Any]: Сериализованный отчёт
@@ -51,6 +53,8 @@ class ReportGeneratorDDDAdapter:
             "bonds": "только облигации"
         }.get(instrument_type, instrument_type)
         logger.info(f"Instrument type filter: {type_label}")
+        if instrument_type == "bonds" and selected_bonds:
+            logger.info(f"Selected bonds: {selected_bonds}")
         logger.info("=" * 80)
         
         # Получаем список тикеров через use case
@@ -64,19 +68,27 @@ class ReportGeneratorDDDAdapter:
             
             logger.info(f"Starting filter: {original_count} symbols, filter type: {instrument_type}")
             
-            for symbol in original_symbols:
-                is_bond = len(symbol) == 12 and symbol[:2].isalpha()  # ISIN код
-                
-                logger.debug(f"Checking symbol: {symbol}, len={len(symbol)}, is_bond={is_bond}")
-                
-                if instrument_type == "stocks" and not is_bond:
-                    filtered_symbols.append(symbol)
-                    logger.debug(f"  -> Included as stock")
-                elif instrument_type == "bonds" and is_bond:
-                    filtered_symbols.append(symbol)
-                    logger.debug(f"  -> Included as bond")
-                else:
-                    logger.debug(f"  -> Filtered out (is_bond={is_bond}, instrument_type={instrument_type})")
+            if instrument_type == "bonds" and selected_bonds:
+                for symbol in selected_bonds:
+                    if symbol in original_symbols:
+                        filtered_symbols.append(symbol)
+                    else:
+                        logger.warning(f"Selected bond {symbol} not in universe")
+                logger.info(f"Using {len(filtered_symbols)} selected bonds")
+            else:
+                for symbol in original_symbols:
+                    is_bond = len(symbol) == 12 and symbol[:2].isalpha()  # ISIN код
+                    
+                    logger.debug(f"Checking symbol: {symbol}, len={len(symbol)}, is_bond={is_bond}")
+                    
+                    if instrument_type == "stocks" and not is_bond:
+                        filtered_symbols.append(symbol)
+                        logger.debug(f"  -> Included as stock")
+                    elif instrument_type == "bonds" and is_bond:
+                        filtered_symbols.append(symbol)
+                        logger.debug(f"  -> Included as bond")
+                    else:
+                        logger.debug(f"  -> Filtered out (is_bond={is_bond}, instrument_type={instrument_type})")
             
             symbols = filtered_symbols
             logger.info(f"Filtered from {original_count} to {len(symbols)} {type_label}")
@@ -85,7 +97,6 @@ class ReportGeneratorDDDAdapter:
             else:
                 logger.warning(f"No {type_label} found! Original symbols were: {', '.join(original_symbols)}")
                 logger.warning("Check if bonds use ISIN codes (12 characters starting with letters)")
-                # Если после фильтрации ничего не осталось, не продолжаем
                 return {
                     "generated_at": datetime.now().isoformat(),
                     "universe": [],
