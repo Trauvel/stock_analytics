@@ -94,20 +94,30 @@ class MetricsCalculator:
         
         return result
     
-    def calculate_dividend_yield(self, div_ttm: float, price: float) -> Optional[float]:
+    def calculate_dividend_yield(self, div_ttm: float, price: float, is_bond: bool = False) -> Optional[float]:
         """
         Рассчитать дивидендную доходность.
         
         Args:
-            div_ttm: Дивиденды за последние 12 месяцев
+            div_ttm: Дивиденды за последние 12 месяцев (для акций) или купонная доходность в % (для облигаций)
             price: Текущая цена
-            
+            is_bond: Является ли инструмент облигацией
+        
         Returns:
             Optional[float]: Дивидендная доходность в процентах
         """
         if price <= 0:
             return None
         
+        # Для облигаций div_ttm уже содержит купонную доходность в процентах
+        if is_bond:
+            # Если значение больше 100, это явно процент (невозможно для дивидендов в рублях)
+            if div_ttm > 100:
+                return None  # Некорректное значение
+            # Для облигаций возвращаем как есть (уже в процентах)
+            return round(div_ttm, 2)
+        
+        # Для акций рассчитываем: (дивиденды / цена) * 100
         dy_pct = (div_ttm / price) * 100
         return round(dy_pct, 2)
     
@@ -249,7 +259,8 @@ class MetricsCalculator:
         self,
         candles: pd.DataFrame,
         current_price: float,
-        div_ttm: float
+        div_ttm: float,
+        symbol: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Рассчитать все метрики для тикера.
@@ -257,19 +268,23 @@ class MetricsCalculator:
         Args:
             candles: DataFrame со свечами
             current_price: Текущая цена
-            div_ttm: Дивиденды TTM
-            
+            div_ttm: Дивиденды TTM (для акций) или купонная доходность в % (для облигаций)
+            symbol: Тикер инструмента (для определения типа)
+        
         Returns:
             Dict с всеми метриками и сигналами
         """
+        # Определяем, является ли это облигацией (по ISIN)
+        is_bond = symbol is not None and len(symbol) == 12 and symbol[:2].isalpha()
+        
         # Рассчитываем SMA
         sma_data = self.calculate_sma(candles)
         
         # Рассчитываем 52W диапазон
         range_52w = self.calculate_52w_range(candles, current_price)
         
-        # Рассчитываем дивидендную доходность
-        dy_pct = self.calculate_dividend_yield(div_ttm, current_price)
+        # Рассчитываем дивидендную доходность (или купонную для облигаций)
+        dy_pct = self.calculate_dividend_yield(div_ttm, current_price, is_bond=is_bond)
         
         # Генерируем сигналы
         signals = self.generate_signals(current_price, sma_data, dy_pct, candles)

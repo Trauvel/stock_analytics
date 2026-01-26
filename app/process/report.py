@@ -24,34 +24,60 @@ class ReportGenerator:
     
     def _load_portfolio_tickers(self) -> List[str]:
         """
-        Загрузить тикеры из портфеля пользователя.
+        Загрузить тикеры из всех портфелей пользователя.
         
         Returns:
-            List[str]: Список тикеров из портфеля
+            List[str]: Список тикеров из всех портфелей
         """
         try:
             project_root = Path(__file__).parent.parent.parent
-            portfolio_path = project_root / "data" / "portfolio.json"
+            portfolios_dir = project_root / "data" / "portfolios"
+            old_portfolio_path = project_root / "data" / "portfolio.json"
             
-            if not portfolio_path.exists():
-                logger.debug("Portfolio file not found, skipping portfolio tickers")
-                return []
-            
-            with open(portfolio_path, 'r', encoding='utf-8') as f:
-                portfolio = json.load(f)
-            
-            # Извлекаем тикеры из позиций
             tickers = []
-            for position in portfolio.get('positions', []):
-                symbol = position.get('symbol')
-                if symbol:
-                    # Очищаем от спецсимволов если нужно
-                    # Например TGLD@ -> TGLD
-                    clean_symbol = symbol.rstrip('@')
-                    tickers.append(clean_symbol)
+            seen = set()
+            
+            # Загружаем из нового формата (несколько портфелей)
+            if portfolios_dir.exists():
+                index_path = portfolios_dir / "index.json"
+                if index_path.exists():
+                    with open(index_path, 'r', encoding='utf-8') as f:
+                        index = json.load(f)
+                    
+                    for portfolio_id in index.get('ids', []):
+                        portfolio_file = portfolios_dir / f"{portfolio_id}.json"
+                        if portfolio_file.exists():
+                            try:
+                                with open(portfolio_file, 'r', encoding='utf-8') as f:
+                                    portfolio = json.load(f)
+                                
+                                for position in portfolio.get('positions', []):
+                                    symbol = position.get('symbol')
+                                    if symbol and symbol not in seen:
+                                        clean_symbol = symbol.rstrip('@')
+                                        tickers.append(clean_symbol)
+                                        seen.add(symbol)
+                            except Exception as e:
+                                logger.warning(f"Error loading portfolio {portfolio_id}: {e}")
+                                continue
+            
+            # Загружаем из старого формата (если есть)
+            if old_portfolio_path.exists():
+                try:
+                    with open(old_portfolio_path, 'r', encoding='utf-8') as f:
+                        portfolio = json.load(f)
+                    
+                    for position in portfolio.get('positions', []):
+                        symbol = position.get('symbol')
+                        if symbol and symbol not in seen:
+                            clean_symbol = symbol.rstrip('@')
+                            tickers.append(clean_symbol)
+                            seen.add(symbol)
+                except Exception as e:
+                    logger.warning(f"Error loading old portfolio: {e}")
             
             if tickers:
-                logger.info(f"Loaded {len(tickers)} tickers from portfolio: {', '.join(tickers)}")
+                logger.info(f"Loaded {len(tickers)} tickers from portfolio(s): {', '.join(tickers)}")
             
             return tickers
             
@@ -113,7 +139,8 @@ class ReportGenerator:
             metrics = self.calculator.calculate_all_metrics(
                 candles=candles,
                 current_price=quote['price'],
-                div_ttm=divs
+                div_ttm=divs,
+                symbol=symbol
             )
             
             # Формируем данные по тикеру
@@ -164,17 +191,22 @@ class ReportGenerator:
                 )
             )
     
-    def generate_report(self, include_portfolio: bool = True) -> AnalysisReport:
+    def generate_report(self, include_portfolio: bool = True, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None) -> AnalysisReport:
         """
         Сгенерировать полный отчёт по всем тикерам из universe и портфеля.
         
         Args:
             include_portfolio: Включить ли тикеры из портфеля (по умолчанию True)
+            instrument_type: Тип инструментов для анализа
+                - "all" - все тикеры (акции + облигации)
+                - "stocks" - только акции
+                - "bonds" - только облигации (или выбранные, если указан selected_bonds)
+            selected_bonds: Список выбранных облигаций (только для instrument_type=bonds)
         
         Returns:
             AnalysisReport: Итоговый отчёт
         """
-        logger.info("Starting report generation")
+        logger.info(f"Starting report generation (instrument_type: {instrument_type}, selected_bonds: {selected_bonds})")
         start_time = datetime.now()
         
         # Получаем объединённый список тикеров
@@ -185,9 +217,54 @@ class ReportGenerator:
             universe = [ticker.symbol for ticker in self.config.universe]
             logger.info(f"Processing {len(universe)} symbols (config only): {', '.join(universe)}")
         
-        # Обрабатываем каждый тикер
+        # Фильтруем по типу инструментов
+        if instrument_type != "all":
+            original_count = len(universe)
+            original_universe = universe.copy()
+            filtered_universe = []
+            
+            logger.info(f"Starting filter: {original_count} symbols, filter type: {instrument_type}")
+            
+            # Если указаны конкретные облигации, используем только их
+            if instrument_type == "bonds" and selected_bonds:
+                logger.info(f"Using selected bonds: {', '.join(selected_bonds)}")
+                for symbol in selected_bonds:
+                    if symbol in original_universe:
+                        filtered_universe.append(symbol)
+                    else:
+                        logger.warning(f"Selected bond {symbol} not found in universe")
+            else:
+                # Обычная фильтрация
+                for symbol in original_universe:
+                    is_bond = len(symbol) == 12 and symbol[:2].isalpha()  # ISIN код
+                    
+                    logger.debug(f"Checking symbol: {symbol}, len={len(symbol)}, is_bond={is_bond}")
+                    
+                    if instrument_type == "stocks" and not is_bond:
+                        filtered_universe.append(symbol)
+                        logger.debug(f"  -> Included as stock")
+                    elif instrument_type == "bonds" and is_bond:
+                        filtered_universe.append(symbol)
+                        logger.debug(f"  -> Included as bond")
+                    else:
+                        logger.debug(f"  -> Filtered out (is_bond={is_bond}, instrument_type={instrument_type})")
+            
+            universe = filtered_universe
+            type_label = "акции" if instrument_type == "stocks" else "облигации"
+            logger.info(f"Filtered from {original_count} to {len(universe)} {type_label}")
+            
+            if len(universe) > 0:
+                logger.info(f"Filtered symbols: {', '.join(universe)}")
+            else:
+                logger.warning(f"No {type_label} found after filtering!")
+                logger.warning(f"Original symbols were: {', '.join(original_universe)}")
+                logger.warning("Check if bonds use ISIN codes (12 characters starting with letters like RU000A10AS85)")
+        
+        # Обрабатываем каждый тикер (только отфильтрованные)
+        logger.info(f"Processing {len(universe)} symbols after filtering")
         by_symbol = {}
         for symbol in universe:
+            logger.info(f"Processing symbol: {symbol} (instrument_type filter: {instrument_type})")
             symbol_data = self._process_symbol(symbol)
             by_symbol[symbol] = symbol_data
         
@@ -203,13 +280,20 @@ class ReportGenerator:
         
         return report
     
-    def generate_and_save(self, save_daily: bool = True, include_portfolio: bool = True) -> Dict[str, Any]:
+    def generate_and_save(
+        self, 
+        save_daily: bool = True, 
+        include_portfolio: bool = True,
+        instrument_type: str = "all",
+        selected_bonds: Optional[List[str]] = None
+    ) -> Dict[str, Any]:
         """
         Сгенерировать отчёт и сохранить его.
         
         Args:
             save_daily: Сохранить ли копию в daily reports
             include_portfolio: Включить ли тикеры из портфеля
+            instrument_type: Тип инструментов для анализа (all, stocks, bonds)
             
         Returns:
             Dict[str, Any]: Сериализованный отчёт
@@ -218,10 +302,20 @@ class ReportGenerator:
         logger.info("GENERATING ANALYSIS REPORT")
         if include_portfolio:
             logger.info("Including portfolio tickers in analysis")
+        type_label = {
+            "all": "все тикеры",
+            "stocks": "только акции",
+            "bonds": "только облигации"
+        }.get(instrument_type, instrument_type)
+        logger.info(f"Instrument type filter: {type_label}")
         logger.info("=" * 80)
         
         # Генерируем отчёт
-        report = self.generate_report(include_portfolio=include_portfolio)
+        report = self.generate_report(
+            include_portfolio=include_portfolio,
+            instrument_type=instrument_type,
+            selected_bonds=selected_bonds
+        )
         
         # Сериализуем в dict (Pydantic model_dump)
         report_dict = report.model_dump(mode='json')

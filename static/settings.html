@@ -60,6 +60,21 @@
                         <h5 class="mb-0">Управление портфелем</h5>
                     </div>
                     <div class="card-body">
+                        <!-- Выбор портфеля -->
+                        <div class="mb-4">
+                            <h6>Выбор портфеля</h6>
+                            <div class="row mb-3">
+                                <div class="col-md-8">
+                                    <select class="form-select" id="portfolio-select" onchange="selectPortfolio()">
+                                        <option value="">Загрузка...</option>
+                                    </select>
+                                </div>
+                                <div class="col-md-4">
+                                    <button class="btn btn-primary w-100" onclick="showCreatePortfolioModal()">+ Создать портфель</button>
+                                </div>
+                            </div>
+                        </div>
+                        
                         <!-- Текущий портфель -->
                         <div id="current-portfolio" class="mb-4">
                             <h6>Текущий портфель</h6>
@@ -83,6 +98,31 @@
                             
                             <button class="btn btn-primary" onclick="addPosition()">+ Добавить позицию</button>
                             <button class="btn btn-success" onclick="savePortfolio()">💾 Сохранить портфель</button>
+                            <button class="btn btn-warning" onclick="clearPortfolio()">🗑️ Очистить портфель</button>
+                            <button class="btn btn-danger" onclick="deleteCurrentPortfolio()" id="delete-portfolio-btn" style="display: none;">🗑️ Удалить портфель</button>
+                        </div>
+                        
+                        <!-- Импорт из Сбера -->
+                        <div class="card mt-4">
+                            <div class="card-header">
+                                <h6 class="mb-0">📥 Импорт из отчёта Сбера</h6>
+                            </div>
+                            <div class="card-body">
+                                <p class="text-muted small">
+                                    Загрузите HTML отчёт брокера Сбера для автоматического импорта позиций и кеша.
+                                </p>
+                                <div class="mb-3">
+                                    <input type="file" class="form-control" id="sber-html-file" accept=".html">
+                                </div>
+                                <div class="form-check mb-3">
+                                    <input class="form-check-input" type="checkbox" id="merge-positions" checked>
+                                    <label class="form-check-label" for="merge-positions">
+                                        Объединить с существующими позициями
+                                    </label>
+                                </div>
+                                <button class="btn btn-info" onclick="importFromSber()">📥 Импортировать из Сбера</button>
+                                <div id="import-status" class="mt-3"></div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -120,22 +160,36 @@
                         <h5 class="mb-0">Параметры анализа</h5>
                     </div>
                     <div class="card-body">
+                        <div class="alert alert-info">
+                            <strong>ℹ️ Справка:</strong> Эти параметры влияют на генерацию торговых сигналов и рекомендаций.
+                            <a href="/docs/analysis_parameters.md" target="_blank" class="alert-link">Подробнее о параметрах →</a>
+                        </div>
+                        
                         <div class="mb-3">
                             <label class="form-label">Целевая дивидендная доходность (%)</label>
                             <input type="number" class="form-control" id="dividend-target" min="0" max="100" step="0.1">
-                            <small class="text-muted">Порог для сигнала DY_GT_TARGET</small>
+                            <small class="text-muted d-block">
+                                <strong>Рекомендуется:</strong> ставка ЦБ или выше (сейчас ~13-15%)<br>
+                                <strong>Использование:</strong> Если дивидендная доходность акции ≥ этого значения, генерируется бычий сигнал <code>DY_GT_TARGET</code>
+                            </small>
                         </div>
                         
                         <div class="mb-3">
                             <label class="form-label">Окна SMA (через запятую)</label>
                             <input type="text" class="form-control" id="sma-windows" placeholder="20, 50, 200">
-                            <small class="text-muted">Периоды для расчёта скользящих средних</small>
+                            <small class="text-muted d-block">
+                                <strong>Что это:</strong> Периоды для расчёта простых скользящих средних (SMA)<br>
+                                <strong>Влияние:</strong><br>
+                                • <strong>SMA20</strong> (20 дней) — краткосрочный тренд, используется для оценки краткосрочного движения цены<br>
+                                • <strong>SMA50</strong> (50 дней) — среднесрочный тренд, используется для определения "Золотого креста" и "Креста смерти" (пересечение с SMA200)<br>
+                                • <strong>SMA200</strong> (200 дней) — долгосрочный тренд, используется для определения недооценённости/переоценённости акции (цена ниже/выше SMA200 = бычий/медвежий сигнал)
+                            </small>
                         </div>
                         
                         <div class="mb-3">
                             <label class="form-label">Пауза между тикерами (секунды)</label>
                             <input type="number" class="form-control" id="rate-limit" min="0.1" max="5" step="0.1">
-                            <small class="text-muted">Rate limit для MOEX API</small>
+                            <small class="text-muted">Rate limit для MOEX API (защита от превышения лимитов запросов)</small>
                         </div>
                         
                         <button class="btn btn-success" onclick="saveParameters()">💾 Сохранить параметры</button>
@@ -191,6 +245,40 @@
     
     <!-- Custom JS -->
     <script src="/static/js/settings.js"></script>
+    
+    <!-- Модальное окно создания портфеля -->
+    <div class="modal fade" id="createPortfolioModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Создать новый портфель</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label class="form-label">Название портфеля</label>
+                        <input type="text" class="form-control" id="new-portfolio-name" placeholder="Например: Сбер, Тинькофф">
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Валюта</label>
+                        <select class="form-select" id="new-portfolio-currency">
+                            <option value="RUB" selected>RUB (Рубли)</option>
+                            <option value="USD">USD (Доллары)</option>
+                            <option value="EUR">EUR (Евро)</option>
+                        </select>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Начальный кеш</label>
+                        <input type="number" class="form-control" id="new-portfolio-cash" value="0" step="0.01">
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Отмена</button>
+                    <button type="button" class="btn btn-primary" onclick="createPortfolio()">Создать</button>
+                </div>
+            </div>
+        </div>
+    </div>
 </body>
 </html>
 

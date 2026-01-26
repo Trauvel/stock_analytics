@@ -273,33 +273,167 @@ function showSuccess(message) {
     setTimeout(() => alert.remove(), 3000);
 }
 
-async function runJobNow() {
-    if (!confirm('Запустить генерацию отчёта сейчас? Это займёт ~60 секунд.')) {
+let bondsList = [];
+
+async function showRunJobModal() {
+    const modal = new bootstrap.Modal(document.getElementById('runJobModal'));
+    modal.show();
+    
+    // Загружаем список облигаций
+    await loadBondsList();
+}
+
+async function loadBondsList() {
+    const bondsListElement = document.getElementById('bonds-list');
+    if (!bondsListElement) {
+        console.error('bonds-list element not found');
         return;
     }
     
     try {
-        const button = event.target;
+        const response = await fetch('/api/bonds');
+        
+        if (!response.ok) {
+            throw new Error(`HTTP error! status: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        
+        if (data.ok && Array.isArray(data.data)) {
+            bondsList = data.data;
+            renderBondsList();
+        } else {
+            const errorMsg = data.error || 'Неизвестная ошибка';
+            console.error('Failed to load bonds:', errorMsg);
+            bondsListElement.innerHTML = 
+                `<div class="text-center text-danger"><small>Ошибка загрузки облигаций: ${errorMsg}</small></div>`;
+        }
+    } catch (error) {
+        console.error('Error loading bonds:', error);
+        bondsListElement.innerHTML = 
+            `<div class="text-center text-danger"><small>Ошибка загрузки облигаций: ${error.message || error}</small></div>`;
+    }
+}
+
+function renderBondsList() {
+    const container = document.getElementById('bonds-list');
+    
+    if (!container) {
+        console.error('bonds-list container not found');
+        return;
+    }
+    
+    if (!Array.isArray(bondsList) || bondsList.length === 0) {
+        container.innerHTML = '<div class="text-center text-muted"><small>Облигации не найдены в портфеле или конфиге</small></div>';
+        return;
+    }
+    
+    let html = '';
+    bondsList.forEach(bond => {
+        // Экранируем HTML для безопасности
+        const safeBond = bond.replace(/[&<>"']/g, function(match) {
+            const escapeMap = {
+                '&': '&amp;',
+                '<': '&lt;',
+                '>': '&gt;',
+                '"': '&quot;',
+                "'": '&#039;'
+            };
+            return escapeMap[match];
+        });
+        
+        html += `
+            <div class="form-check">
+                <input class="form-check-input bond-checkbox" type="checkbox" value="${safeBond}" id="bond-${safeBond.replace(/[^a-zA-Z0-9]/g, '_')}" checked>
+                <label class="form-check-label" for="bond-${safeBond.replace(/[^a-zA-Z0-9]/g, '_')}">
+                    <code>${safeBond}</code>
+                </label>
+            </div>
+        `;
+    });
+    
+    container.innerHTML = html;
+}
+
+function toggleBondsSelection() {
+    const selectedType = document.querySelector('input[name="instrumentType"]:checked').value;
+    const bondsSelection = document.getElementById('bonds-selection');
+    
+    if (selectedType === 'bonds') {
+        bondsSelection.style.display = 'block';
+    } else {
+        bondsSelection.style.display = 'none';
+    }
+}
+
+function selectAllBonds() {
+    document.querySelectorAll('.bond-checkbox').forEach(checkbox => {
+        checkbox.checked = true;
+    });
+}
+
+function deselectAllBonds() {
+    document.querySelectorAll('.bond-checkbox').forEach(checkbox => {
+        checkbox.checked = false;
+    });
+}
+
+async function runJobNow() {
+    // Получаем выбранный тип инструментов
+    const selectedType = document.querySelector('input[name="instrumentType"]:checked').value;
+    
+    // Получаем выбранные облигации (если тип = bonds)
+    let selectedBonds = null;
+    if (selectedType === 'bonds') {
+        const checkedBoxes = document.querySelectorAll('.bond-checkbox:checked');
+        selectedBonds = Array.from(checkedBoxes).map(cb => cb.value);
+        
+        if (selectedBonds.length === 0) {
+            showError('Выберите хотя бы одну облигацию');
+            return;
+        }
+    }
+    
+    // Закрываем модальное окно
+    const modal = bootstrap.Modal.getInstance(document.getElementById('runJobModal'));
+    modal.hide();
+    
+    try {
+        const button = document.querySelector('button[onclick="showRunJobModal()"]');
+        const originalText = button.textContent;
         button.disabled = true;
         button.textContent = '⏳ Генерация...';
         
-        const response = await fetch('/scheduler/run-now', { method: 'POST' });
+        // Формируем URL с параметрами
+        let url = `/scheduler/run-now?instrument_type=${selectedType}`;
+        if (selectedBonds && selectedBonds.length > 0) {
+            url += `&selected_bonds=${selectedBonds.join(',')}`;
+        }
+        
+        // Отправляем запрос с параметром фильтрации
+        const response = await fetch(url, { method: 'POST' });
         const data = await response.json();
         
         if (data.ok) {
-            showSuccess('Отчёт успешно сгенерирован!');
+            let typeLabel = selectedType === 'all' ? 'все тикеры' : 
+                            selectedType === 'stocks' ? 'акции' : 
+                            selectedBonds ? `облигации (${selectedBonds.length} шт.)` : 'облигации';
+            showSuccess(`Отчёт успешно сгенерирован для ${typeLabel}!`);
             // Перезагружаем данные
             setTimeout(() => loadReport(), 1000);
         } else {
-            showError('Ошибка генерации: ' + data.error);
+            showError('Ошибка генерации: ' + (data.error || data.message || 'Unknown error'));
         }
         
         button.disabled = false;
-        button.textContent = '▶️ Запустить сейчас';
+        button.textContent = originalText;
         
     } catch (error) {
         console.error('Error running job:', error);
         showError('Ошибка запуска задачи');
+        const button = document.querySelector('button[onclick="showRunJobModal()"]');
+        button.disabled = false;
+        button.textContent = '▶️ Запустить сейчас';
     }
 }
 

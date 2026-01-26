@@ -1,5 +1,6 @@
 """Запуск API сервера с планировщиком."""
 
+import sys
 import uvicorn
 from loguru import logger
 
@@ -18,12 +19,21 @@ if __name__ == "__main__":
     logger.info("Press Ctrl+C to stop")
     logger.info("=" * 80)
     
-    # Запускаем приложение с планировщиком
-    uvicorn.run(
-        "app.main:app",
-        host="0.0.0.0",
-        port=8000,
-        log_level="info",
-        reload=False  # Важно: не используем reload с планировщиком!
-    )
+    try:
+        # Запускаем приложение с планировщиком
+        uvicorn.run(
+            "app.main:app",
+            host="0.0.0.0",
+            port=8000,
+            log_level="info",
+            reload=False  # Важно: не используем reload с планировщиком!
+        )
+    except KeyboardInterrupt:
+        logger.info("Shutting down...")
+        sys.exit(0)
+    except Exception as e:
+        logger.error(f"Error starting server: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 

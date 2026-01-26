@@ -14,6 +14,11 @@ from typing import Optional, List
 
 from app.api.server import app as api_app
 from app.scheduler.daily_job import DailyJobScheduler
+from app.application.dependencies import container
+
+# Настройка DI для всего приложения
+from dependency_injector.wiring import inject, Provide
+container.wire(modules=[__name__, "app.api.server"])
 
 
 # Глобальный экземпляр планировщика
@@ -119,22 +124,46 @@ async def scheduler_status():
 
 
 @app.post("/scheduler/run-now")
-async def run_job_now():
-    """Запустить задачу генерации отчёта немедленно."""
+async def run_job_now(
+    instrument_type: str = Query(default="all", description="Тип инструментов: all, stocks, bonds"),
+    selected_bonds: Optional[str] = Query(default=None, description="Список выбранных облигаций через запятую")
+):
+    """
+    Запустить задачу генерации отчёта немедленно.
+    
+    Args:
+        instrument_type: Тип инструментов для анализа
+            - "all" - все тикеры (акции + облигации)
+            - "stocks" - только акции
+            - "bonds" - только облигации (или выбранные, если указан selected_bonds)
+        selected_bonds: Список выбранных облигаций через запятую (только для instrument_type=bonds)
+    """
     if not scheduler:
         return {
             "ok": False,
             "error": "Scheduler not initialized"
         }
     
-    logger.info("Manual job trigger requested via API")
+    # Если указаны конкретные облигации, передаём их
+    bonds_list = None
+    if selected_bonds:
+        bonds_list = [b.strip() for b in selected_bonds.split(',') if b.strip()]
+        logger.info(f"Selected bonds: {bonds_list}")
+    
+    logger.info(f"Manual job trigger requested via API (instrument_type: {instrument_type}, selected_bonds: {bonds_list})")
     
     try:
-        success = scheduler.run_once()
+        success = scheduler.run_once(instrument_type=instrument_type, selected_bonds=bonds_list)
+        
+        type_label = {
+            "all": "все тикеры",
+            "stocks": "акции",
+            "bonds": f"облигации ({len(bonds_list) if bonds_list else 'все'})"
+        }.get(instrument_type, instrument_type)
         
         return {
             "ok": success,
-            "message": "Job completed successfully" if success else "Job failed, check logs"
+            "message": f"Job completed successfully for {type_label}" if success else "Job failed, check logs"
         }
     except Exception as e:
         logger.error(f"Error running job manually: {e}")

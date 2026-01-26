@@ -1,5 +1,5 @@
 base_currency: RUB
-dividend_target_pct: 8
+dividend_target_pct: 16
 output:
   analysis_file: data/analysis.json
   raw_data_dir: data/raw
@@ -22,8 +22,6 @@ universe:
   symbol: MGNT
 - market: moex
   symbol: YDEX
-- market: moex
-  symbol: FIVE
 - market: moex
   symbol: MOEX
 - market: moex

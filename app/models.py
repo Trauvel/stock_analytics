@@ -110,6 +110,7 @@ class Position(BaseModel):
 
 class Portfolio(BaseModel):
     """Пользовательский портфель."""
+    id: Optional[str] = None
     name: Optional[str] = None
     currency: str = "RUB"
     cash: float = Field(default=0, ge=0)

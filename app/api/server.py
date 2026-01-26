@@ -5,7 +5,7 @@ from typing import Dict, Any, List, Optional
 from pathlib import Path
 import yaml
 
-from fastapi import FastAPI, HTTPException, status, Query
+from fastapi import FastAPI, HTTPException, status, Query, UploadFile, File, Form
 from fastapi.responses import JSONResponse, HTMLResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
@@ -21,6 +21,24 @@ from app.store.io import (
     StorageError
 )
 from app.models import Portfolio
+from app.application.dependencies import container
+from app.application.stock_analysis.generate_report_use_case import GenerateReportUseCase
+from app.application.recommendation.generate_recommendations_use_case import GenerateRecommendationsUseCase
+from app.application.portfolio.get_portfolio_use_case import GetPortfolioUseCase
+from app.application.portfolio.save_portfolio_use_case import SavePortfolioUseCase
+from app.application.portfolio.import_sber_html_use_case import ImportSberHTMLUseCase
+from app.application.portfolio.list_portfolios_use_case import ListPortfoliosUseCase
+from app.application.portfolio.create_portfolio_use_case import CreatePortfolioUseCase
+from app.application.portfolio.delete_portfolio_use_case import DeletePortfolioUseCase
+from app.api.portfolio_helpers import convert_pydantic_to_domain_portfolio
+from app.api.dependencies import (
+    get_portfolio_use_case,
+    get_save_portfolio_use_case,
+    get_import_sber_html_use_case,
+    get_list_portfolios_use_case,
+    get_create_portfolio_use_case,
+    get_delete_portfolio_use_case
+)
 
 
 # Pydantic модели для API
@@ -73,6 +91,17 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Настройка DI для FastAPI
+from fastapi import Depends
+from app.api.dependencies import (
+    get_generate_report_use_case,
+    get_generate_recommendations_use_case,
+    get_portfolio_use_case,
+    get_save_portfolio_use_case,
+    get_import_sber_html_use_case
+)
+container.wire(modules=[__name__])
+
 @app.get("/", response_class=HTMLResponse)
 async def root():
     """Редирект на главную страницу."""
@@ -95,6 +124,51 @@ async def api_root():
         ok=True,
         message="Stock Analytics API. Visit /docs for documentation."
     )
+
+
+@app.get("/bonds")
+async def get_bonds_list():
+    """
+    Получить список всех облигаций из портфеля и конфига.
+    
+    Returns:
+        Dict: Список облигаций (ISIN коды)
+    """
+    try:
+        from app.process.report import ReportGenerator
+        
+        generator = ReportGenerator()
+        
+        # Получаем все тикеры
+        all_tickers = generator._get_combined_universe()
+        logger.debug(f"Total tickers found: {len(all_tickers)}")
+        
+        # Фильтруем только облигации (ISIN коды)
+        bonds = []
+        for ticker in all_tickers:
+            # Проверяем, является ли тикер ISIN кодом (облигацией)
+            # ISIN: 12 символов, первые 2 - буквы, остальные - буквы/цифры
+            is_bond = len(ticker) == 12 and ticker[:2].isalpha() and ticker[2:].isalnum()
+            if is_bond:
+                bonds.append(ticker)
+        
+        logger.info(f"Found {len(bonds)} bonds out of {len(all_tickers)} total tickers")
+        if bonds:
+            logger.debug(f"Bonds: {', '.join(bonds)}")
+        
+        return {
+            "ok": True,
+            "data": bonds
+        }
+    except Exception as e:
+        import traceback
+        error_details = traceback.format_exc()
+        logger.error(f"Error getting bonds list: {e}\n{error_details}")
+        return {
+            "ok": False,
+            "data": [],
+            "error": str(e)
+        }
 
 
 @app.get("/config")
@@ -250,22 +324,46 @@ async def remove_ticker(symbol: str):
 @app.get("/recommendations")
 async def get_recommendations_api(
     only: Optional[List[str]] = Query(default=None),
-    min_score: Optional[float] = None
+    min_score: Optional[float] = None,
+    symbols: Optional[List[str]] = Query(default=None)
 ):
     """
-    Получить рекомендации BUY/HOLD/SELL.
+    Получить рекомендации BUY/HOLD/SELL из сохранённого отчёта.
+    
+    Использует данные из data/analysis.json (не ходит в MOEX).
     
     Args:
         only: Фильтр по действиям (BUY, HOLD, SELL)
         min_score: Минимальный score
+        symbols: Список тикеров (игнорируется, берутся из отчёта)
         
     Returns:
         Dict: Список рекомендаций
     """
     try:
+        # Используем старый способ - из сохранённого отчёта
+        # Это не ходит в MOEX, а берёт данные из data/analysis.json
         from app.reco.service import get_recommendations
+        from app.config.loader import get_config
+        from pathlib import Path
+        
+        # Проверяем наличие файла отчёта
+        config = get_config()
+        analysis_file = Path(config.output.analysis_file)
+        
+        if not analysis_file.exists():
+            logger.warning(f"Analysis file not found: {analysis_file}")
+            return {
+                "ok": True,
+                "data": {
+                    "items": [],
+                    "count": 0
+                }
+            }
         
         recos = get_recommendations(only=only, min_score=min_score)
+        
+        logger.info(f"Returned {len(recos)} recommendations from saved report")
         
         return {
             "ok": True,
@@ -277,7 +375,16 @@ async def get_recommendations_api(
         
     except Exception as e:
         logger.error(f"Error getting recommendations: {e}")
-        return {"ok": False, "error": str(e)}
+        import traceback
+        traceback.print_exc()
+        return {
+            "ok": False,
+            "error": str(e),
+            "data": {
+                "items": [],
+                "count": 0
+            }
+        }
 
 
 @app.get("/recommendations/summary")
@@ -490,9 +597,12 @@ async def get_today_report():
 
 
 @app.post("/portfolio", response_model=MessageResponse)
-async def save_portfolio_data(portfolio: Portfolio):
+async def save_portfolio_data(
+    portfolio: Portfolio,
+    use_case: SavePortfolioUseCase = Depends(get_save_portfolio_use_case)
+):
     """
-    Сохранить портфель пользователя.
+    Сохранить портфель пользователя (через DDD Use Case).
     
     Args:
         portfolio: Данные портфеля (Pydantic модель)
@@ -501,53 +611,137 @@ async def save_portfolio_data(portfolio: Portfolio):
         MessageResponse: Результат операции
     """
     try:
-        config = get_config()
+        logger.info(f"Saving portfolio via DDD: {len(portfolio.positions)} positions")
         
-        # Добавляем временные метки
-        portfolio_dict = portfolio.model_dump(mode='json')
+        # Преобразуем Pydantic модель в доменную сущность
+        domain_portfolio = convert_pydantic_to_domain_portfolio(portfolio)
         
-        if not portfolio_dict.get('created_at'):
-            portfolio_dict['created_at'] = datetime.now().isoformat()
+        # Сохраняем через Use Case
+        saved_portfolio = await use_case.execute(domain_portfolio)
         
-        portfolio_dict['updated_at'] = datetime.now().isoformat()
+        logger.info(f"Portfolio saved successfully via DDD: {len(saved_portfolio.positions)} positions, ID: {saved_portfolio.id}")
         
-        # Сохраняем
-        save_portfolio(portfolio_dict)
+        # Возвращаем портфель в data для обновления ID на клиенте
+        portfolio_data = saved_portfolio.to_dict()
         
-        logger.info(f"Saved portfolio with {len(portfolio.positions)} positions")
-        
-        return MessageResponse(
-            ok=True,
-            message=f"Portfolio saved successfully with {len(portfolio.positions)} positions"
+        return JSONResponse(
+            status_code=200,
+            content={
+                "ok": True,
+                "message": f"Portfolio saved successfully with {len(saved_portfolio.positions)} positions",
+                "data": portfolio_data
+            }
         )
         
     except Exception as e:
-        logger.error(f"Error saving portfolio: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to save portfolio: {str(e)}"
+        logger.error(f"Error saving portfolio via DDD: {e}")
+        # Fallback на старый способ
+        try:
+            config = get_config()
+            portfolio_dict = portfolio.model_dump(mode='json')
+            if not portfolio_dict.get('created_at'):
+                portfolio_dict['created_at'] = datetime.now().isoformat()
+            portfolio_dict['updated_at'] = datetime.now().isoformat()
+            save_portfolio(portfolio_dict)
+            return MessageResponse(
+                ok=True,
+                message=f"Portfolio saved (fallback) with {len(portfolio.positions)} positions"
+            )
+        except Exception as fallback_error:
+            logger.error(f"Fallback also failed: {fallback_error}")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Failed to save portfolio: {str(e)}"
+            )
+
+
+@app.post("/portfolio/import/sber-html", response_model=MessageResponse)
+async def import_portfolio_from_sber_html(
+    file: UploadFile = File(...),
+    merge: bool = Form(default=True),
+    portfolio_id: Optional[str] = Form(default=None),
+    use_case: ImportSberHTMLUseCase = Depends(get_import_sber_html_use_case)
+):
+    """
+    Импортировать портфель из HTML отчёта Сбера.
+    
+    Args:
+        file: HTML файл отчёта Сбера
+        merge: Если True, объединить с существующим портфелем
+        portfolio_id: ID портфеля для импорта (если не указан, используется дефолтный)
+        
+    Returns:
+        MessageResponse: Результат импорта
+    """
+    try:
+        from pathlib import Path
+        import tempfile
+        
+        logger.info(f"Importing portfolio from Sber HTML file: {file.filename} (portfolio_id: {portfolio_id})")
+        
+        # Сохраняем загруженный файл во временную директорию
+        with tempfile.NamedTemporaryFile(delete=False, suffix='.html', mode='wb') as tmp_file:
+            content = await file.read()
+            tmp_file.write(content)
+            tmp_path = tmp_file.name
+        
+        try:
+            # Импортируем через Use Case
+            portfolio = await use_case.execute(
+                html_file_path=tmp_path,
+                merge_with_existing=merge,
+                portfolio_id=portfolio_id
+            )
+            
+            return MessageResponse(
+                ok=True,
+                message=f"Импортировано {len(portfolio.positions)} позиций, кеш: {portfolio.cash.amount:.2f} {portfolio.currency.code}"
+            )
+        finally:
+            # Удаляем временный файл
+            Path(tmp_path).unlink(missing_ok=True)
+            
+    except Exception as e:
+        logger.error(f"Error importing portfolio from Sber HTML: {e}")
+        import traceback
+        traceback.print_exc()
+        return MessageResponse(
+            ok=False,
+            message=f"Ошибка импорта: {str(e)}"
         )
 
 
 @app.get("/portfolio/view", response_model=PortfolioResponse)
-async def get_portfolio_data():
+async def get_portfolio_data(
+    portfolio_id: Optional[str] = Query(None, description="ID портфеля (если не указан, возвращает дефолтный)"),
+    use_case: GetPortfolioUseCase = Depends(get_portfolio_use_case)
+):
     """
-    Получить сохранённый портфель.
+    Получить сохранённый портфель (через DDD Use Case).
+    
+    Args:
+        portfolio_id: ID портфеля (если не указан, возвращает дефолтный)
     
     Returns:
         PortfolioResponse: Данные портфеля или ошибка
     """
     try:
-        portfolio_data = load_portfolio()
+        logger.info(f"Getting portfolio via DDD: {portfolio_id or 'default'}")
         
-        if portfolio_data is None:
+        # Получаем через Use Case
+        domain_portfolio = await use_case.execute(portfolio_id)
+        
+        if domain_portfolio is None:
             return PortfolioResponse(
                 ok=False,
                 data=None,
-                error="No portfolio found. Create one first using POST /portfolio"
+                error="No portfolio found. Create one first using POST /portfolios"
             )
         
-        logger.info(f"Returned portfolio with {len(portfolio_data.get('positions', []))} positions")
+        # Преобразуем в формат API
+        portfolio_data = domain_portfolio.to_dict()
+        
+        logger.info(f"Returned portfolio via DDD: {len(domain_portfolio.positions)} positions")
         
         return PortfolioResponse(
             ok=True,
@@ -556,11 +750,205 @@ async def get_portfolio_data():
         )
         
     except Exception as e:
-        logger.error(f"Error loading portfolio: {e}")
+        logger.error(f"Error loading portfolio via DDD: {e}")
         return PortfolioResponse(
             ok=False,
             data=None,
             error=f"Failed to load portfolio: {str(e)}"
+        )
+
+
+# === Множественные портфели ===
+
+class PortfolioListItem(BaseModel):
+    """Элемент списка портфелей."""
+    id: str
+    name: Optional[str]
+    created_at: Optional[str]
+    updated_at: Optional[str]
+    positions_count: int
+    total_value: Optional[float]
+
+
+class PortfoliosListResponse(BaseModel):
+    """Ответ со списком портфелей."""
+    ok: bool
+    data: List[PortfolioListItem]
+    error: Optional[str] = None
+
+
+class CreatePortfolioRequest(BaseModel):
+    """Запрос на создание портфеля."""
+    name: str
+    currency: str = "RUB"
+    cash: float = 0.0
+
+
+@app.get("/portfolios", response_model=PortfoliosListResponse)
+async def list_portfolios(
+    use_case: ListPortfoliosUseCase = Depends(get_list_portfolios_use_case)
+):
+    """
+    Получить список всех портфелей.
+    
+    Returns:
+        PortfoliosListResponse: Список портфелей
+    """
+    try:
+        logger.info("Listing all portfolios")
+        
+        portfolios = await use_case.execute()
+        
+        portfolio_items = []
+        for portfolio in portfolios:
+            total_value = None
+            if portfolio.total_value():
+                total_value = portfolio.total_value().amount
+            
+            portfolio_items.append(PortfolioListItem(
+                id=portfolio.id or "unknown",
+                name=portfolio.name,
+                created_at=portfolio.created_at.isoformat() if portfolio.created_at else None,
+                updated_at=portfolio.updated_at.isoformat() if portfolio.updated_at else None,
+                positions_count=len(portfolio.positions),
+                total_value=total_value
+            ))
+        
+        logger.info(f"Returned {len(portfolio_items)} portfolios")
+        
+        return PortfoliosListResponse(
+            ok=True,
+            data=portfolio_items,
+            error=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Error listing portfolios: {e}")
+        return PortfoliosListResponse(
+            ok=False,
+            data=[],
+            error=f"Failed to list portfolios: {str(e)}"
+        )
+
+
+@app.post("/portfolios", response_model=PortfolioResponse)
+async def create_portfolio(
+    request: CreatePortfolioRequest,
+    use_case: CreatePortfolioUseCase = Depends(get_create_portfolio_use_case)
+):
+    """
+    Создать новый портфель.
+    
+    Args:
+        request: Данные для создания портфеля
+    
+    Returns:
+        PortfolioResponse: Созданный портфель
+    """
+    try:
+        logger.info(f"Creating portfolio: {request.name}")
+        
+        portfolio = await use_case.execute(
+            name=request.name,
+            currency=request.currency,
+            cash=request.cash
+        )
+        
+        portfolio_data = portfolio.to_dict()
+        
+        logger.info(f"Created portfolio {portfolio.id}: {request.name}")
+        
+        return PortfolioResponse(
+            ok=True,
+            data=portfolio_data,
+            error=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Error creating portfolio: {e}")
+        return PortfolioResponse(
+            ok=False,
+            data=None,
+            error=f"Failed to create portfolio: {str(e)}"
+        )
+
+
+@app.get("/portfolio/{portfolio_id}", response_model=PortfolioResponse)
+async def get_portfolio_by_id(
+    portfolio_id: str,
+    use_case: GetPortfolioUseCase = Depends(get_portfolio_use_case)
+):
+    """
+    Получить портфель по ID.
+    
+    Args:
+        portfolio_id: ID портфеля
+    
+    Returns:
+        PortfolioResponse: Данные портфеля или ошибка
+    """
+    try:
+        logger.info(f"Getting portfolio by ID: {portfolio_id}")
+        
+        domain_portfolio = await use_case.execute(portfolio_id)
+        
+        if domain_portfolio is None:
+            return PortfolioResponse(
+                ok=False,
+                data=None,
+                error=f"Portfolio {portfolio_id} not found"
+            )
+        
+        portfolio_data = domain_portfolio.to_dict()
+        
+        logger.info(f"Returned portfolio {portfolio_id}: {len(domain_portfolio.positions)} positions")
+        
+        return PortfolioResponse(
+            ok=True,
+            data=portfolio_data,
+            error=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Error loading portfolio {portfolio_id}: {e}")
+        return PortfolioResponse(
+            ok=False,
+            data=None,
+            error=f"Failed to load portfolio: {str(e)}"
+        )
+
+
+@app.delete("/portfolio/{portfolio_id}", response_model=MessageResponse)
+async def delete_portfolio(
+    portfolio_id: str,
+    use_case: DeletePortfolioUseCase = Depends(get_delete_portfolio_use_case)
+):
+    """
+    Удалить портфель по ID.
+    
+    Args:
+        portfolio_id: ID портфеля
+    
+    Returns:
+        MessageResponse: Результат операции
+    """
+    try:
+        logger.info(f"Deleting portfolio: {portfolio_id}")
+        
+        await use_case.execute(portfolio_id)
+        
+        logger.info(f"Deleted portfolio: {portfolio_id}")
+        
+        return MessageResponse(
+            ok=True,
+            message=f"Portfolio {portfolio_id} deleted successfully"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error deleting portfolio {portfolio_id}: {e}")
+        return MessageResponse(
+            ok=False,
+            message=f"Failed to delete portfolio: {str(e)}"
         )
 
 
@@ -686,6 +1074,53 @@ async def get_predictor_config_api():
             "ok": False,
             "error": str(e)
         }
+
+
+@app.post("/report/generate", response_model=ReportResponse)
+async def generate_report_ddd(
+    symbols: Optional[List[str]] = Query(default=None),
+    use_case: GenerateReportUseCase = Depends(get_generate_report_use_case)
+):
+    """
+    Сгенерировать отчёт через DDD Use Case (новая архитектура).
+    
+    Args:
+        symbols: Список тикеров для анализа (если не указан, берётся из конфига)
+        
+    Returns:
+        ReportResponse: Сгенерированный отчёт
+    """
+    try:
+        # Если тикеры не указаны, берём из конфига
+        if not symbols:
+            config = get_config()
+            symbols = [ticker.symbol for ticker in config.universe]
+        
+        logger.info(f"Generating report via DDD for {len(symbols)} symbols")
+        
+        # Генерируем отчёт через Use Case
+        report_data = await use_case.execute(symbols=symbols)
+        
+        # Сохраняем отчёт (для совместимости со старым кодом)
+        from app.store.io import save_analysis_report
+        config = get_config()
+        save_analysis_report(report_data, config.output.analysis_file)
+        
+        logger.info(f"Report generated successfully via DDD: {len(report_data.get('universe', []))} symbols")
+        
+        return ReportResponse(
+            ok=True,
+            data=report_data,
+            error=None
+        )
+        
+    except Exception as e:
+        logger.error(f"Error generating report via DDD: {e}")
+        return ReportResponse(
+            ok=False,
+            data=None,
+            error=str(e)
+        )
 
 
 @app.get("/report/summary")

@@ -33,6 +33,7 @@ pyarrow>=12.0.0
 # Утилиты (опционально)
 tenacity>=8.2.0
 loguru>=0.7.0
+dependency-injector>=4.41.0  # DI контейнер для DDD
 
 # Тестирование
 pytest>=7.4.0

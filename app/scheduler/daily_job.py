@@ -2,26 +2,46 @@
 
 import sys
 from datetime import datetime
+from typing import Optional, List
 from apscheduler.schedulers.background import BackgroundScheduler
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
 from app.config.loader import get_config
 from app.process.report import ReportGenerator
+from app.process.report_ddd_adapter import ReportGeneratorDDDAdapter
 
 
 class DailyJobScheduler:
     """Планировщик ежедневной генерации отчётов."""
     
-    def __init__(self):
-        """Инициализация планировщика."""
+    def __init__(self, use_ddd: bool = False):
+        """
+        Инициализация планировщика.
+        
+        Args:
+            use_ddd: Использовать ли новый DDD адаптер вместо старого ReportGenerator
+        """
         self.config = get_config()
         self.scheduler = BackgroundScheduler(timezone=self.config.schedule.tz)
-        self.report_generator = ReportGenerator()
+        
+        if use_ddd:
+            logger.info("Using DDD adapter for report generation")
+            self.report_generator = ReportGeneratorDDDAdapter()
+        else:
+            logger.info("Using legacy ReportGenerator")
+            self.report_generator = ReportGenerator()
     
-    def run_daily_job(self):
+    def run_daily_job(self, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None):
         """
         Выполнить ежедневную задачу генерации отчёта.
+        
+        Args:
+            instrument_type: Тип инструментов для анализа
+                - "all" - все тикеры (акции + облигации)
+                - "stocks" - только акции
+                - "bonds" - только облигации (или выбранные, если указан selected_bonds)
+            selected_bonds: Список выбранных облигаций (только для instrument_type=bonds)
         
         Этапы:
         1. Получение данных по всем тикерам
@@ -30,14 +50,18 @@ class DailyJobScheduler:
         4. Сохранение копии в data/reports/DATE.json
         """
         logger.info("=" * 80)
-        logger.info("STARTING DAILY JOB")
+        logger.info(f"STARTING DAILY JOB (instrument_type: {instrument_type}, selected_bonds: {selected_bonds})")
         logger.info("=" * 80)
         
         start_time = datetime.now()
         
         try:
-            # Генерируем и сохраняем отчёт
-            report_dict = self.report_generator.generate_and_save(save_daily=True)
+            # Генерируем и сохраняем отчёт с фильтрацией
+            report_dict = self.report_generator.generate_and_save(
+                save_daily=True,
+                instrument_type=instrument_type,
+                selected_bonds=selected_bonds
+            )
             
             # Статистика
             successful = sum(
@@ -126,10 +150,16 @@ class DailyJobScheduler:
             self.scheduler.shutdown()
             logger.info("Scheduler stopped")
     
-    def run_once(self):
-        """Выполнить задачу один раз без планировщика."""
-        logger.info("Running job once (manual trigger)")
-        return self.run_daily_job()
+    def run_once(self, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None):
+        """
+        Выполнить задачу один раз без планировщика.
+        
+        Args:
+            instrument_type: Тип инструментов для анализа (all, stocks, bonds)
+            selected_bonds: Список выбранных облигаций (только для instrument_type=bonds)
+        """
+        logger.info(f"Running job once (manual trigger, instrument_type: {instrument_type}, selected_bonds: {selected_bonds})")
+        return self.run_daily_job(instrument_type=instrument_type, selected_bonds=selected_bonds)
     
     def get_job_info(self):
         """
