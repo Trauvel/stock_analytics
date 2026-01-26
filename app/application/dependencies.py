@@ -8,6 +8,7 @@ from app.infrastructure.persistence.repositories.stock_repository_impl import St
 from app.ingest.moex_client import MOEXClient
 from app.config.loader import get_config
 from app.application.stock_analysis.generate_report_use_case import GenerateReportUseCase
+from app.application.stock_analysis.get_universe_use_case import GetUniverseUseCase
 from app.domain.recommendation.services.recommendation_engine import (
     RecommendationEngine,
     RecommendationConfig
@@ -23,6 +24,9 @@ from app.application.portfolio.import_sber_html_use_case import ImportSberHTMLUs
 from app.application.portfolio.list_portfolios_use_case import ListPortfoliosUseCase
 from app.application.portfolio.create_portfolio_use_case import CreatePortfolioUseCase
 from app.application.portfolio.delete_portfolio_use_case import DeletePortfolioUseCase
+from app.domain.price_history.repositories.price_history_repository import PriceHistoryRepository
+from app.infrastructure.persistence.repositories.price_history_repository_impl import PriceHistoryRepositoryImpl
+from app.application.price_history.save_snapshot_use_case import SaveSnapshotUseCase
 
 
 class ApplicationContainer(containers.DeclarativeContainer):
@@ -48,6 +52,11 @@ class ApplicationContainer(containers.DeclarativeContainer):
         dividend_target_pct=providers.Callable(
             lambda: get_config().dividend_target_pct
         )
+    )
+    
+    # Use Cases - Stock Analysis
+    get_universe_use_case = providers.Factory(
+        GetUniverseUseCase
     )
     
     # Domain Services - Recommendation
@@ -144,6 +153,17 @@ class ApplicationContainer(containers.DeclarativeContainer):
     delete_portfolio_use_case = providers.Factory(
         DeletePortfolioUseCase,
         portfolio_repository=portfolio_repository
+    )
+    
+    # Repositories - Price History
+    price_history_repository = providers.Singleton(
+        PriceHistoryRepositoryImpl
+    )
+    
+    # Use Cases - Price History
+    save_snapshot_use_case = providers.Factory(
+        SaveSnapshotUseCase,
+        price_history_repository=price_history_repository
     )
 
 

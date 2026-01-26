@@ -1,4 +1,11 @@
-"""Модуль для расчёта метрик и генерации торговых сигналов."""
+"""
+Модуль для расчёта метрик и генерации торговых сигналов.
+
+⚠️ DEPRECATED: Этот модуль устарел и будет удалён в будущих версиях.
+Используйте app.domain.stock_analysis.services.metrics_calculator.MetricsCalculator вместо этого.
+
+Для обратной совместимости этот модуль оставлен, но новые функции добавлять сюда не рекомендуется.
+"""
 
 from typing import List, Dict, Any, Optional
 import pandas as pd
@@ -10,6 +17,11 @@ from app.config.loader import get_config
 
 
 class MetricsCalculator:
+    """
+    Калькулятор метрик для анализа акций.
+    
+    ⚠️ DEPRECATED: Используйте app.domain.stock_analysis.services.metrics_calculator.MetricsCalculator
+    """
     """Калькулятор метрик для анализа акций."""
     
     def __init__(self):
@@ -121,6 +133,42 @@ class MetricsCalculator:
         dy_pct = (div_ttm / price) * 100
         return round(dy_pct, 2)
     
+    def calculate_atr(self, candles: pd.DataFrame, period: int = 14) -> Optional[float]:
+        """
+        Рассчитать ATR (Average True Range) - индикатор волатильности.
+        
+        Args:
+            candles: DataFrame со свечами (должен содержать high, low, close)
+            period: Период для расчёта ATR (по умолчанию 14)
+            
+        Returns:
+            Optional[float]: Значение ATR или None если недостаточно данных
+        """
+        if candles.empty or len(candles) < period + 1:
+            return None
+        
+        required_columns = ['high', 'low', 'close']
+        if not all(col in candles.columns for col in required_columns):
+            return None
+        
+        try:
+            atr_series = ta.atr(
+                high=candles['high'],
+                low=candles['low'],
+                close=candles['close'],
+                length=period
+            )
+            
+            if atr_series.empty:
+                return None
+            
+            atr_value = float(atr_series.iloc[-1])
+            return round(atr_value, 2) if not pd.isna(atr_value) else None
+            
+        except Exception as e:
+            logger.warning(f"Error calculating ATR: {e}")
+            return None
+    
     def calculate_volume_spike(self, candles: pd.DataFrame, threshold: float = 1.8) -> bool:
         """
         Определить всплеск объёма торгов.
@@ -152,7 +200,8 @@ class MetricsCalculator:
         price: float,
         sma_data: Dict[str, Optional[float]],
         dy_pct: Optional[float],
-        candles: pd.DataFrame
+        candles: pd.DataFrame,
+        rsi: Optional[float] = None
     ) -> List[SignalType]:
         """
         Генерировать торговые сигналы на основе метрик.
@@ -162,6 +211,7 @@ class MetricsCalculator:
             sma_data: Данные SMA
             dy_pct: Дивидендная доходность
             candles: DataFrame со свечами для дополнительных проверок
+            rsi: RSI индикатор (опционально)
             
         Returns:
             List[SignalType]: Список сигналов
@@ -191,6 +241,14 @@ class MetricsCalculator:
         # Сигнал 6: Всплеск объёма (опционально)
         if self.calculate_volume_spike(candles):
             signals.append(SignalType.VOL_SPIKE)
+        
+        # Сигнал 7: RSI перепроданность (RSI < 30)
+        if rsi is not None and rsi < 30:
+            signals.append(SignalType.RSI_OVERSOLD)
+        
+        # Сигнал 8: RSI перекупленность (RSI > 70)
+        if rsi is not None and rsi > 70:
+            signals.append(SignalType.RSI_OVERBOUGHT)
         
         return signals
     
@@ -255,6 +313,39 @@ class MetricsCalculator:
         # Проверяем пересечение сверху вниз
         return prev_sma50 > prev_sma200 and curr_sma50 < curr_sma200
     
+    def calculate_rsi(self, candles: pd.DataFrame, period: int = 14) -> Optional[float]:
+        """
+        Рассчитать RSI (Relative Strength Index).
+        
+        Args:
+            candles: DataFrame со свечами (должен содержать колонку 'close')
+            period: Период для расчёта RSI (по умолчанию 14)
+            
+        Returns:
+            Optional[float]: Значение RSI (0-100) или None если недостаточно данных
+        """
+        if candles.empty or 'close' not in candles.columns:
+            logger.warning("Cannot calculate RSI: empty candles or missing 'close' column")
+            return None
+        
+        if len(candles) < period + 1:
+            logger.debug(f"Not enough data for RSI: have {len(candles)}, need {period + 1}")
+            return None
+        
+        try:
+            close_prices = candles['close']
+            rsi_series = ta.rsi(close_prices, length=period)
+            
+            if rsi_series.empty:
+                return None
+            
+            rsi_value = float(rsi_series.iloc[-1])
+            return round(rsi_value, 2) if not pd.isna(rsi_value) else None
+            
+        except Exception as e:
+            logger.warning(f"Error calculating RSI: {e}")
+            return None
+    
     def calculate_all_metrics(
         self,
         candles: pd.DataFrame,
@@ -286,8 +377,14 @@ class MetricsCalculator:
         # Рассчитываем дивидендную доходность (или купонную для облигаций)
         dy_pct = self.calculate_dividend_yield(div_ttm, current_price, is_bond=is_bond)
         
-        # Генерируем сигналы
-        signals = self.generate_signals(current_price, sma_data, dy_pct, candles)
+        # Рассчитываем RSI
+        rsi = self.calculate_rsi(candles)
+        
+        # Генерируем сигналы (передаём RSI)
+        signals = self.generate_signals(current_price, sma_data, dy_pct, candles, rsi=rsi)
+        
+        # Рассчитываем ATR для адаптивных порогов
+        atr = self.calculate_atr(candles)
         
         # Собираем все метрики
         metrics = {
@@ -295,11 +392,13 @@ class MetricsCalculator:
             **range_52w,
             'div_ttm': div_ttm,
             'dy_pct': dy_pct,
+            'rsi': rsi,
+            'atr': atr,
             'signals': signals
         }
         
         logger.debug(f"Calculated metrics: SMA20={sma_data.get('sma_20')}, "
-                    f"DY={dy_pct}%, Signals={len(signals)}")
+                    f"DY={dy_pct}%, RSI={rsi}, Signals={len(signals)}")
         
         return metrics
 

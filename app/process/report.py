@@ -1,4 +1,11 @@
-"""Модуль генерации отчётов анализа."""
+"""
+Модуль генерации отчётов анализа.
+
+⚠️ DEPRECATED: Этот модуль устарел и будет удалён в будущих версиях.
+Используйте app.application.stock_analysis.generate_report_use_case.GenerateReportUseCase вместо этого.
+
+Для обратной совместимости используйте app.process.report_ddd_adapter.ReportGeneratorDDDAdapter.
+"""
 
 from datetime import datetime
 from typing import Dict, Any, List, Optional
@@ -14,13 +21,35 @@ from app.models import AnalysisReport, SymbolData, SymbolMeta
 
 
 class ReportGenerator:
+    """
+    Генератор отчётов анализа акций.
+    
+    ⚠️ DEPRECATED: Используйте app.process.report_ddd_adapter.ReportGeneratorDDDAdapter
+    или app.application.stock_analysis.generate_report_use_case.GenerateReportUseCase
+    """
     """Генератор отчётов анализа акций."""
     
-    def __init__(self):
-        """Инициализация генератора."""
+    def __init__(self, save_snapshots: bool = True):
+        """
+        Инициализация генератора.
+        
+        Args:
+            save_snapshots: Сохранять ли snapshots в историю (по умолчанию True)
+        """
         self.config = get_config()
         self.client = MOEXClient()
         self.calculator = MetricsCalculator()
+        self.save_snapshots = save_snapshots
+        
+        # Инициализируем use case для сохранения snapshots (опционально)
+        self._snapshot_use_case = None
+        if save_snapshots:
+            try:
+                from app.application.dependencies import container
+                self._snapshot_use_case = container.save_snapshot_use_case()
+            except Exception as e:
+                logger.warning(f"Could not initialize snapshot use case: {e}. Snapshots will not be saved.")
+                self.save_snapshots = False
     
     def _load_portfolio_tickers(self) -> List[str]:
         """
@@ -143,6 +172,11 @@ class ReportGenerator:
                 symbol=symbol
             )
             
+            # Получаем объём из последней свечи
+            volume = None
+            if not candles.empty and 'volume' in candles.columns:
+                volume = float(candles['volume'].iloc[-1]) if len(candles) > 0 else None
+            
             # Формируем данные по тикеру
             symbol_data = SymbolData(
                 price=quote['price'],
@@ -156,6 +190,7 @@ class ReportGenerator:
                 low_52w=metrics['low_52w'],
                 dist_52w_low_pct=metrics['dist_52w_low_pct'],
                 dist_52w_high_pct=metrics['dist_52w_high_pct'],
+                rsi=metrics.get('rsi'),
                 signals=metrics['signals'],
                 meta=SymbolMeta(
                     board=quote['board'],
@@ -163,6 +198,23 @@ class ReportGenerator:
                     updated_at=datetime.now()
                 )
             )
+            
+            # Сохраняем snapshot в историю (если включено)
+            if self.save_snapshots and self._snapshot_use_case:
+                try:
+                    self._snapshot_use_case.execute(
+                        symbol=symbol,
+                        price=quote['price'],
+                        volume=volume,
+                        sma_20=metrics['sma_20'],
+                        sma_50=metrics['sma_50'],
+                        sma_200=metrics['sma_200'],
+                        dy_pct=metrics['dy_pct'],
+                        rsi=metrics.get('rsi'),
+                        atr=metrics.get('atr')
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to save snapshot for {symbol}: {e}")
             
             logger.info(f"Successfully processed {symbol}: price={quote['price']}, signals={len(metrics['signals'])}")
             return symbol_data

@@ -17,6 +17,8 @@ class SignalType(str, Enum):
     VOL_SPIKE = "VOL_SPIKE"
     NEAR_52W_LOW = "NEAR_52W_LOW"
     NEAR_52W_HIGH = "NEAR_52W_HIGH"
+    RSI_OVERSOLD = "RSI_OVERSOLD"
+    RSI_OVERBOUGHT = "RSI_OVERBOUGHT"
 
 
 class SymbolMeta(BaseModel):
@@ -39,6 +41,7 @@ class SymbolData(BaseModel):
     low_52w: Optional[float] = None
     dist_52w_low_pct: Optional[float] = None
     dist_52w_high_pct: Optional[float] = None
+    rsi: Optional[float] = None
     signals: List[SignalType] = Field(default_factory=list)
     meta: SymbolMeta = Field(default_factory=SymbolMeta)
 

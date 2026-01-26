@@ -3,26 +3,38 @@
 import sys
 import signal
 from contextlib import asynccontextmanager
-
 from pathlib import Path
+
 from fastapi import FastAPI, Query
 from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import uvicorn
 from typing import Optional, List
+from dotenv import load_dotenv
 
 from app.api.server import app as api_app
 from app.scheduler.daily_job import DailyJobScheduler
+from app.scheduler.frequent_updates_job import FrequentUpdatesScheduler
+from app.infrastructure.persistence.repositories.price_history_repository_impl import PriceHistoryRepositoryImpl
 from app.application.dependencies import container
+
+# Загружаем переменные окружения из .env файла
+env_path = Path(__file__).parent.parent / ".env"
+if env_path.exists():
+    load_dotenv(env_path, override=False)
+    logger.info(f"Loaded environment variables from {env_path}")
+else:
+    logger.warning(f".env file not found at {env_path}")
 
 # Настройка DI для всего приложения
 from dependency_injector.wiring import inject, Provide
 container.wire(modules=[__name__, "app.api.server"])
 
 
-# Глобальный экземпляр планировщика
+# Глобальные экземпляры планировщиков
 scheduler = None
+frequent_updates_scheduler = None
 
 
 @asynccontextmanager
@@ -32,14 +44,36 @@ async def lifespan(app: FastAPI):
     
     Запускает планировщик при старте и останавливает при завершении.
     """
-    global scheduler
+    global scheduler, frequent_updates_scheduler
     
     # Startup
     logger.info("Starting application...")
     
-    # Запускаем планировщик
+    # Запускаем основной планировщик (ежедневный полный анализ)
     scheduler = DailyJobScheduler()
     scheduler.start(run_immediately=False)
+    
+    # Запускаем планировщик частых обновлений (каждые 3-4 часа)
+    try:
+        price_history_repo = PriceHistoryRepositoryImpl()
+        frequent_updates_scheduler = FrequentUpdatesScheduler(
+            price_history_repository=price_history_repo,
+            update_interval_hours=3
+        )
+        
+        # Добавляем задачу в основной планировщик для частых обновлений
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.scheduler.add_job(
+            frequent_updates_scheduler.update_portfolio_tickers,
+            trigger=IntervalTrigger(hours=3),
+            id='frequent_updates_job',
+            name='Frequent Portfolio Updates (every 3 hours)',
+            replace_existing=True
+        )
+        logger.info("Frequent updates scheduler started (every 3 hours)")
+    except Exception as e:
+        logger.warning(f"Could not start frequent updates scheduler: {e}")
+        frequent_updates_scheduler = None
     
     logger.info("Application started successfully")
     
@@ -48,8 +82,19 @@ async def lifespan(app: FastAPI):
     # Shutdown
     logger.info("Shutting down application...")
     
+    # scheduler и frequent_updates_scheduler уже объявлены как global выше
+    
     if scheduler:
         scheduler.stop()
+    
+    if frequent_updates_scheduler:
+        # Очистка старых snapshots (оставляем последние 30 дней)
+        try:
+            deleted = frequent_updates_scheduler.price_history_repo.cleanup_old(days_to_keep=30)
+            if deleted > 0:
+                logger.info(f"Cleaned up {deleted} old price snapshots")
+        except Exception as e:
+            logger.warning(f"Error cleaning up old snapshots: {e}")
     
     logger.info("Application stopped")
 

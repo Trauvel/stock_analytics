@@ -15,6 +15,8 @@ class SignalType(str, Enum):
     VOL_SPIKE = "VOL_SPIKE"
     NEAR_52W_LOW = "NEAR_52W_LOW"
     NEAR_52W_HIGH = "NEAR_52W_HIGH"
+    RSI_OVERSOLD = "RSI_OVERSOLD"
+    RSI_OVERBOUGHT = "RSI_OVERBOUGHT"
 
 
 @dataclass(frozen=True)

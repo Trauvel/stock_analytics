@@ -15,12 +15,13 @@ from app.process.report_ddd_adapter import ReportGeneratorDDDAdapter
 class DailyJobScheduler:
     """Планировщик ежедневной генерации отчётов."""
     
-    def __init__(self, use_ddd: bool = False):
+    def __init__(self, use_ddd: bool = True):
         """
         Инициализация планировщика.
         
         Args:
             use_ddd: Использовать ли новый DDD адаптер вместо старого ReportGenerator
+                    (по умолчанию True - рекомендуется использовать DDD)
         """
         self.config = get_config()
         self.scheduler = BackgroundScheduler(timezone=self.config.schedule.tz)
@@ -29,7 +30,7 @@ class DailyJobScheduler:
             logger.info("Using DDD adapter for report generation")
             self.report_generator = ReportGeneratorDDDAdapter()
         else:
-            logger.info("Using legacy ReportGenerator")
+            logger.warning("Using legacy ReportGenerator (deprecated, consider switching to DDD)")
             self.report_generator = ReportGenerator()
     
     def run_daily_job(self, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None):

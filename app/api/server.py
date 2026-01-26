@@ -135,12 +135,11 @@ async def get_bonds_list():
         Dict: Список облигаций (ISIN коды)
     """
     try:
-        from app.process.report import ReportGenerator
+        from app.application.stock_analysis.get_universe_use_case import GetUniverseUseCase
         
-        generator = ReportGenerator()
-        
-        # Получаем все тикеры
-        all_tickers = generator._get_combined_universe()
+        # Используем DDD use case для получения списка тикеров
+        get_universe_use_case = GetUniverseUseCase()
+        all_tickers = get_universe_use_case.execute(include_portfolio=True)
         logger.debug(f"Total tickers found: {len(all_tickers)}")
         
         # Фильтруем только облигации (ISIN коды)

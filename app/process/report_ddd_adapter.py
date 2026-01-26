@@ -6,6 +6,7 @@ from loguru import logger
 
 from app.application.dependencies import container
 from app.application.stock_analysis.generate_report_use_case import GenerateReportUseCase
+from app.application.stock_analysis.get_universe_use_case import GetUniverseUseCase
 from app.config.loader import get_config
 from app.store.io import save_analysis_report, save_daily_report
 from datetime import datetime
@@ -21,6 +22,7 @@ class ReportGeneratorDDDAdapter:
         """Инициализация адаптера."""
         self.config = get_config()
         self.use_case: GenerateReportUseCase = container.generate_report_use_case()
+        self.get_universe_use_case = GetUniverseUseCase()
     
     def generate_and_save(
         self,
@@ -51,16 +53,8 @@ class ReportGeneratorDDDAdapter:
         logger.info(f"Instrument type filter: {type_label}")
         logger.info("=" * 80)
         
-        # Получаем список тикеров
-        symbols = [ticker.symbol for ticker in self.config.universe]
-        
-        # Добавляем тикеры из портфеля, если нужно
-        if include_portfolio:
-            portfolio_tickers = self._load_portfolio_tickers()
-            for ticker in portfolio_tickers:
-                if ticker not in symbols:
-                    symbols.append(ticker)
-                    logger.info(f"Added portfolio ticker to analysis: {ticker}")
+        # Получаем список тикеров через use case
+        symbols = self.get_universe_use_case.execute(include_portfolio=include_portfolio)
         
         # Фильтруем по типу инструментов
         if instrument_type != "all":
@@ -168,69 +162,3 @@ class ReportGeneratorDDDAdapter:
         logger.info("=" * 80)
         
         return report_dict
-    
-    def _load_portfolio_tickers(self) -> list[str]:
-        """
-        Загрузить тикеры из всех портфелей пользователя.
-        
-        Returns:
-            List[str]: Список тикеров из всех портфелей
-        """
-        try:
-            from pathlib import Path
-            import json
-            
-            project_root = Path(__file__).parent.parent.parent
-            portfolios_dir = project_root / "data" / "portfolios"
-            old_portfolio_path = project_root / "data" / "portfolio.json"
-            
-            tickers = []
-            seen = set()
-            
-            # Загружаем из нового формата (несколько портфелей)
-            if portfolios_dir.exists():
-                index_path = portfolios_dir / "index.json"
-                if index_path.exists():
-                    with open(index_path, 'r', encoding='utf-8') as f:
-                        index = json.load(f)
-                    
-                    for portfolio_id in index.get('ids', []):
-                        portfolio_file = portfolios_dir / f"{portfolio_id}.json"
-                        if portfolio_file.exists():
-                            try:
-                                with open(portfolio_file, 'r', encoding='utf-8') as f:
-                                    portfolio = json.load(f)
-                                
-                                for position in portfolio.get('positions', []):
-                                    symbol = position.get('symbol')
-                                    if symbol and symbol not in seen:
-                                        clean_symbol = symbol.rstrip('@')
-                                        tickers.append(clean_symbol)
-                                        seen.add(symbol)
-                            except Exception as e:
-                                logger.warning(f"Error loading portfolio {portfolio_id}: {e}")
-                                continue
-            
-            # Загружаем из старого формата (если есть)
-            if old_portfolio_path.exists():
-                try:
-                    with open(old_portfolio_path, 'r', encoding='utf-8') as f:
-                        portfolio = json.load(f)
-                    
-                    for position in portfolio.get('positions', []):
-                        symbol = position.get('symbol')
-                        if symbol and symbol not in seen:
-                            clean_symbol = symbol.rstrip('@')
-                            tickers.append(clean_symbol)
-                            seen.add(symbol)
-                except Exception as e:
-                    logger.warning(f"Error loading old portfolio: {e}")
-            
-            if tickers:
-                logger.info(f"Loaded {len(tickers)} tickers from portfolio(s): {', '.join(tickers)}")
-            
-            return tickers
-            
-        except Exception as e:
-            logger.warning(f"Failed to load portfolio tickers: {e}")
-            return []
