@@ -19,6 +19,7 @@
             <div class="d-flex">
                 <a href="/static/forecast.html" class="btn btn-sm btn-outline-info me-2">🔮 Event Forecast</a>
                 <a href="/static/settings.html" class="btn btn-sm btn-outline-light me-2">⚙️ Настройки</a>
+                <button class="btn btn-sm btn-outline-warning me-2" onclick="showExportModal()">⬇️ Экспорт (ChatGPT)</button>
                 <button class="btn btn-sm btn-outline-light me-2" onclick="loadReport()">🔄 Обновить</button>
                 <button class="btn btn-sm btn-success" onclick="showRunJobModal()">▶️ Запустить сейчас</button>
             </div>
@@ -296,10 +297,70 @@
         </div>
     </div>
 
+    <!-- Модальное окно экспорта отчёта -->
+    <div class="modal fade" id="exportModal" tabindex="-1">
+        <div class="modal-dialog modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">⬇️ Экспорт отчёта (для ChatGPT)</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="alert alert-info">
+                        Скопируйте JSON ниже и вставьте в ChatGPT вместе с вопросом (например: «Что докупить/что продать и почему?»).
+                    </div>
+
+                    <div class="row g-2 mb-3">
+                        <div class="col-md-6">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="export-include-report" checked>
+                                <label class="form-check-label" for="export-include-report">
+                                    Включить отчёт (by_symbol, сигналы, метрики)
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="export-include-summary" checked>
+                                <label class="form-check-label" for="export-include-summary">
+                                    Включить summary
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="export-include-recos" checked>
+                                <label class="form-check-label" for="export-include-recos">
+                                    Включить рекомендации (BUY/HOLD/SELL + reasons)
+                                </label>
+                            </div>
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label">Режим экспорта</label>
+                            <select class="form-select form-select-sm" id="export-mode">
+                                <option value="compact" selected>Компактный (убирает null/пустое)</option>
+                                <option value="full">Полный (как есть)</option>
+                            </select>
+                            <small class="text-muted d-block mt-1">Если сообщение получается слишком большим — выключите “Отчёт”.</small>
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <button class="btn btn-sm btn-outline-primary me-2" onclick="refreshExportPayload()">🔄 Обновить экспорт</button>
+                        <button class="btn btn-sm btn-success me-2" onclick="copyExportToClipboard()">📋 Скопировать</button>
+                        <button class="btn btn-sm btn-secondary" onclick="downloadExportJson()">💾 Скачать .json</button>
+                    </div>
+
+                    <textarea id="export-text" class="form-control" rows="14" readonly>Загрузка...</textarea>
+                    <small id="export-status" class="text-muted d-block mt-2"></small>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Bootstrap JS -->
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     
     <!-- Custom JS -->
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=export-1"></script>
 </body>
 </html>

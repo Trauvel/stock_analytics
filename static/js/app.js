@@ -2,6 +2,10 @@
 
 const API_BASE = '/api';
 let currentReport = null;
+let _lastSummary = null;
+let _lastRecos = null;
+let _lastExportPayload = null;
+let _lastExportFilename = null;
 
 // === Подсказки по сигналам (для "Детально") ===
 const SIGNAL_META = {
@@ -138,6 +142,7 @@ async function loadReport() {
         }
         
         currentReport = reportData.data;
+        _lastSummary = summaryData?.data || null;
         
         // Обновляем статистику
         updateStatistics(summaryData.data);
@@ -157,6 +162,130 @@ async function loadReport() {
         console.error('Error loading report:', error);
         showError('Ошибка загрузки данных');
     }
+}
+
+// === Экспорт отчёта (для ChatGPT) ===
+function _compactClone(value) {
+    // Удаляем null/undefined, пустые массивы/объекты
+    if (value === null || value === undefined) return undefined;
+    if (Array.isArray(value)) {
+        const arr = value
+            .map(_compactClone)
+            .filter(v => v !== undefined);
+        return arr.length ? arr : undefined;
+    }
+    if (typeof value === 'object') {
+        const out = {};
+        for (const [k, v] of Object.entries(value)) {
+            const cv = _compactClone(v);
+            if (cv !== undefined) out[k] = cv;
+        }
+        return Object.keys(out).length ? out : undefined;
+    }
+    return value;
+}
+
+async function _ensureExportDataLoaded() {
+    if (!currentReport) {
+        const reportData = await fetchAPI('/report/today');
+        if (reportData?.ok && reportData?.data) currentReport = reportData.data;
+    }
+    if (!_lastSummary) {
+        const summaryData = await fetchAPI('/report/summary');
+        if (summaryData?.ok && summaryData?.data) _lastSummary = summaryData.data;
+    }
+    if (!_lastRecos) {
+        const resp = await fetch(`${API_BASE}/recommendations`);
+        const data = await resp.json();
+        if (data?.ok && data?.data?.items) _lastRecos = data.data.items;
+    }
+}
+
+function _buildExportPayload(options) {
+    const generatedAt = currentReport?.generated_at || null;
+    const payload = {
+        meta: {
+            exported_at: new Date().toISOString(),
+            report_generated_at: generatedAt,
+            app: 'stock_analytics',
+            version: 'export-1'
+        }
+    };
+
+    if (options.includeSummary) payload.summary = _lastSummary;
+    if (options.includeReport) payload.report = currentReport;
+    if (options.includeRecos) payload.recommendations = _lastRecos;
+
+    if (options.mode === 'compact') {
+        const compacted = _compactClone(payload);
+        return compacted || payload;
+    }
+    return payload;
+}
+
+async function refreshExportPayload() {
+    const textEl = document.getElementById('export-text');
+    const statusEl = document.getElementById('export-status');
+    if (textEl) textEl.value = 'Загрузка...';
+    if (statusEl) statusEl.textContent = '';
+
+    try {
+        await _ensureExportDataLoaded();
+
+        const includeReport = document.getElementById('export-include-report')?.checked ?? true;
+        const includeSummary = document.getElementById('export-include-summary')?.checked ?? true;
+        const includeRecos = document.getElementById('export-include-recos')?.checked ?? true;
+        const mode = document.getElementById('export-mode')?.value || 'compact';
+
+        _lastExportPayload = _buildExportPayload({ includeReport, includeSummary, includeRecos, mode });
+        const jsonText = JSON.stringify(_lastExportPayload, null, 2);
+        if (textEl) textEl.value = jsonText;
+
+        const safeTs = (currentReport?.generated_at || new Date().toISOString()).replace(/[:.]/g, '-');
+        _lastExportFilename = `stock_analytics_report_${safeTs}.json`;
+
+        if (statusEl) {
+            statusEl.textContent = `Готово. Размер: ${Math.round(jsonText.length / 1024)} KB. Файл: ${_lastExportFilename}`;
+        }
+    } catch (e) {
+        console.error('Export error:', e);
+        if (textEl) textEl.value = `Ошибка экспорта: ${e?.message || e}`;
+        if (statusEl) statusEl.textContent = 'Проверьте, что отчёт существует (сначала нажмите «Обновить» или «Запустить сейчас»).';
+    }
+}
+
+function showExportModal() {
+    const modalEl = document.getElementById('exportModal');
+    const modal = new bootstrap.Modal(modalEl);
+    modal.show();
+    refreshExportPayload();
+}
+
+async function copyExportToClipboard() {
+    const textEl = document.getElementById('export-text');
+    const statusEl = document.getElementById('export-status');
+    try {
+        const text = textEl?.value || '';
+        await navigator.clipboard.writeText(text);
+        if (statusEl) statusEl.textContent = 'Скопировано в буфер обмена.';
+    } catch (e) {
+        console.error('Clipboard error:', e);
+        if (statusEl) statusEl.textContent = 'Не удалось скопировать (браузер запретил). Можно выделить текст и скопировать вручную.';
+    }
+}
+
+function downloadExportJson() {
+    const textEl = document.getElementById('export-text');
+    const jsonText = textEl?.value || '';
+    const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = _lastExportFilename || 'stock_analytics_report.json';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
 }
 
 function updateStatistics(summary) {
@@ -513,6 +642,12 @@ window.addEventListener('load', () => {
     loadRecommendations();
 });
 
+// Экспорт в глобальную область видимости (onclick)
+window.showExportModal = showExportModal;
+window.refreshExportPayload = refreshExportPayload;
+window.copyExportToClipboard = copyExportToClipboard;
+window.downloadExportJson = downloadExportJson;
+
 // === Рекомендации ===
 
 let currentFilter = 'all';
@@ -528,6 +663,81 @@ function getActionBadge(action, score, confidence) {
     return `${badges[action]} <small class="text-muted ms-2">${confidenceBadge} Score: ${score}</small>`;
 }
 
+function buildRecommendationReasons(reco) {
+    const baseReasons = Array.isArray(reco.reasons) ? reco.reasons.map(r => String(r)) : [];
+    const extra = [];
+
+    const sd = currentReport?.by_symbol?.[reco.symbol];
+    if (sd && !sd.meta?.error) {
+        // RSI
+        if (sd.rsi !== null && sd.rsi !== undefined) {
+            const rsiVal = Number(sd.rsi);
+            let rsiNote = '';
+            if (!isNaN(rsiVal)) {
+                if (rsiVal < 30) rsiNote = ' (перепроданность)';
+                else if (rsiVal > 70) rsiNote = ' (перекупленность)';
+                extra.push(`RSI: ${rsiVal.toFixed(1)}${rsiNote}`);
+            }
+        }
+
+        // SMA200 контекст
+        if (sd.price && sd.sma_200) {
+            const price = Number(sd.price);
+            const sma200 = Number(sd.sma_200);
+            if (!isNaN(price) && !isNaN(sma200) && sma200 > 0) {
+                const diffPct = ((price / sma200 - 1) * 100);
+                const side = diffPct >= 0 ? 'выше' : 'ниже';
+                extra.push(`Цена ${side} SMA200 на ${Math.abs(diffPct).toFixed(1)}% (SMA200: ${sma200.toFixed(2)}₽)`);
+            }
+        }
+
+        // 52W контекст
+        if (sd.low_52w && sd.high_52w) {
+            const low = Number(sd.low_52w);
+            const high = Number(sd.high_52w);
+            if (!isNaN(low) && !isNaN(high)) {
+                extra.push(`52W диапазон: ${low.toFixed(2)}₽ .. ${high.toFixed(2)}₽`);
+            }
+        }
+        if (sd.dist_52w_low_pct !== null && sd.dist_52w_low_pct !== undefined) {
+            const v = Number(sd.dist_52w_low_pct);
+            if (!isNaN(v)) extra.push(`От 52W Low: +${v.toFixed(1)}%`);
+        }
+        if (sd.dist_52w_high_pct !== null && sd.dist_52w_high_pct !== undefined) {
+            const v = Number(sd.dist_52w_high_pct);
+            if (!isNaN(v)) extra.push(`До 52W High: -${v.toFixed(1)}%`);
+        }
+
+        // Сигналы (человеческие названия)
+        if (Array.isArray(sd.signals) && sd.signals.length) {
+            const names = sd.signals.map(s => SIGNAL_META?.[s]?.name || s).join(', ');
+            extra.push(`Сигналы: ${names}`);
+        }
+
+        // DY
+        if (sd.dy_pct !== null && sd.dy_pct !== undefined) {
+            const dy = Number(sd.dy_pct);
+            if (!isNaN(dy)) extra.push(`DY: ${dy.toFixed(2)}%`);
+        }
+
+        // Обновление данных
+        if (sd.meta?.updated_at) {
+            extra.push(`Данные обновлены: ${formatDateTime(sd.meta.updated_at)}`);
+        }
+    }
+
+    // Дедупликация
+    const all = [...baseReasons];
+    for (const line of extra) {
+        if (!all.includes(line)) all.push(line);
+    }
+
+    return {
+        reasonsCount: all.length,
+        reasonsHtml: all.map(r => `<li>${escapeHtmlAttr(r)}</li>`).join('')
+    };
+}
+
 function renderRecommendation(reco) {
     const cardClass = {
         'BUY': 'border-success',
@@ -535,7 +745,7 @@ function renderRecommendation(reco) {
         'SELL': 'border-danger'
     }[reco.action];
     
-    const reasons = reco.reasons.map(r => `<li>${r}</li>`).join('');
+    const rr = buildRecommendationReasons(reco);
     
     return `
         <div class="col-12 col-md-6 col-lg-4 mb-3 reco-card" data-action="${reco.action}">
@@ -555,9 +765,9 @@ function renderRecommendation(reco) {
                     ${reco.sizing_hint ? `<p class="text-primary mb-2"><small><strong>💡 ${reco.sizing_hint}</strong></small></p>` : ''}
                     
                     <details class="mt-2">
-                        <summary class="text-muted" style="cursor: pointer;">Обоснование (${reco.reasons.length})</summary>
+                        <summary class="text-muted" style="cursor: pointer;">Обоснование (${rr.reasonsCount})</summary>
                         <ul class="small mt-2 mb-0">
-                            ${reasons}
+                            ${rr.reasonsHtml}
                         </ul>
                     </details>
                 </div>
@@ -568,6 +778,14 @@ function renderRecommendation(reco) {
 
 async function loadRecommendations() {
     try {
+        // Чтобы "обоснование" могло использовать новые метрики из отчёта
+        if (!currentReport) {
+            const reportData = await fetchAPI('/report/today');
+            if (reportData?.ok && reportData?.data) {
+                currentReport = reportData.data;
+            }
+        }
+
         const response = await fetch(`${API_BASE}/recommendations`);
         const data = await response.json();
         
