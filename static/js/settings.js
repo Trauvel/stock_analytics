@@ -717,10 +717,110 @@ async function loadSchedulerStatus() {
     }
 }
 
+// === Журнал запусков ===
+function _fmtTs(ts) {
+    if (!ts) return '';
+    try {
+        // Пытаемся красиво показать ISO timestamp
+        const d = new Date(ts);
+        if (!isNaN(d.getTime())) return d.toLocaleString();
+    } catch (_) {}
+    return String(ts);
+}
+
+function _badgeSuccess(val) {
+    if (val === true) return '<span class="badge bg-success">OK</span>';
+    if (val === false) return '<span class="badge bg-danger">FAIL</span>';
+    return '<span class="badge bg-secondary">—</span>';
+}
+
+async function loadJobJournal() {
+    const limitEl = document.getElementById('journal-limit');
+    const limit = Math.max(1, Math.min(500, parseInt(limitEl?.value || '50', 10) || 50));
+
+    const dailyBody = document.getElementById('daily-journal-body');
+    const frequentBody = document.getElementById('frequent-journal-body');
+    if (dailyBody) dailyBody.innerHTML = '<tr><td colspan="7" class="text-muted">Загрузка...</td></tr>';
+    if (frequentBody) frequentBody.innerHTML = '<tr><td colspan="8" class="text-muted">Загрузка...</td></tr>';
+
+    try {
+        const [dailyResp, freqResp] = await Promise.all([
+            fetch(`/scheduler/daily/history?limit=${limit}`),
+            fetch(`/scheduler/frequent/history?limit=${limit}`)
+        ]);
+
+        const dailyData = await dailyResp.json();
+        const freqData = await freqResp.json();
+
+        const dailyItems = dailyData?.data?.items || [];
+        const freqItems = freqData?.data?.items || [];
+
+        if (dailyBody) {
+            if (!dailyItems.length) {
+                dailyBody.innerHTML = '<tr><td colspan="7" class="text-muted">Нет записей.</td></tr>';
+            } else {
+                dailyBody.innerHTML = dailyItems.slice().reverse().map(it => {
+                    const ts = _fmtTs(it.ts);
+                    const ev = it.event || '';
+                    const ok = _badgeSuccess(it.success);
+                    const dur = (it.duration_seconds != null) ? Number(it.duration_seconds).toFixed(1) : '';
+                    const processed = (it.processed != null) ? it.processed : '';
+                    const signals = (it.total_signals != null) ? it.total_signals : '';
+                    const err = it.error ? String(it.error) : '';
+                    return `<tr>
+                        <td>${ts}</td>
+                        <td><span class="badge bg-info text-dark">${ev}</span></td>
+                        <td>${ok}</td>
+                        <td>${dur}</td>
+                        <td>${processed}</td>
+                        <td>${signals}</td>
+                        <td class="text-danger">${err}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+
+        if (frequentBody) {
+            if (!freqItems.length) {
+                frequentBody.innerHTML = '<tr><td colspan="8" class="text-muted">Нет записей.</td></tr>';
+            } else {
+                frequentBody.innerHTML = freqItems.slice().reverse().map(it => {
+                    const ts = _fmtTs(it.ts);
+                    const ev = it.event || '';
+                    const ok = _badgeSuccess(it.success);
+                    const dur = (it.duration_seconds != null) ? Number(it.duration_seconds).toFixed(1) : '';
+                    const succ = (it.successful != null) ? it.successful : '';
+                    const failed = (it.failed != null) ? it.failed : '';
+                    const signals = (it.signals_count != null) ? it.signals_count : '';
+                    const err = it.error ? String(it.error) : '';
+                    return `<tr>
+                        <td>${ts}</td>
+                        <td><span class="badge bg-info text-dark">${ev}</span></td>
+                        <td>${ok}</td>
+                        <td>${dur}</td>
+                        <td>${succ}</td>
+                        <td>${failed}</td>
+                        <td>${signals}</td>
+                        <td class="text-danger">${err}</td>
+                    </tr>`;
+                }).join('');
+            }
+        }
+    } catch (e) {
+        console.error('Error loading job journal:', e);
+        if (dailyBody) dailyBody.innerHTML = '<tr><td colspan="7" class="text-danger">Ошибка загрузки журнала.</td></tr>';
+        if (frequentBody) frequentBody.innerHTML = '<tr><td colspan="8" class="text-danger">Ошибка загрузки журнала.</td></tr>';
+    }
+}
+
 // === Инициализация ===
 window.addEventListener('load', () => {
     loadPortfoliosList();
     loadConfig();
     loadSchedulerStatus();
+    loadJobJournal();
 });
+
+// Экспорт в global scope для onclick
+window.loadJobJournal = loadJobJournal;
 

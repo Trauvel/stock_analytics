@@ -22,7 +22,8 @@ class AnalyzeChangesUseCase:
     def execute(
         self,
         symbols: List[str],
-        compare_periods: List[float] = None
+        compare_periods: List[float] = None,
+        filter_trading_hours: bool = True,
     ) -> List[ChangeSignal]:
         """
         Выполнить use case - проанализировать изменения для списка инструментов.
@@ -38,7 +39,8 @@ class AnalyzeChangesUseCase:
         
         signals = self._change_analyzer.detect_significant_changes(
             symbols=symbols,
-            compare_periods=compare_periods
+            compare_periods=compare_periods,
+            filter_trading_hours=filter_trading_hours,
         )
         
         logger.info(f"Found {len(signals)} significant changes")

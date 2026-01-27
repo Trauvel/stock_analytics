@@ -18,10 +18,12 @@ from typing import Optional, List
 from dotenv import load_dotenv
 
 from app.api.server import app as api_app
+from app.config.monitoring_loader import load_monitoring_config
 from app.scheduler.daily_job import DailyJobScheduler
 from app.scheduler.frequent_updates_job import FrequentUpdatesScheduler
 from app.infrastructure.persistence.repositories.price_history_repository_impl import PriceHistoryRepositoryImpl
 from app.application.dependencies import container
+from app.utils.job_journal import tail_jsonl
 
 # Загружаем переменные окружения из .env файла (UTF-8)
 env_path = Path(__file__).parent.parent / ".env"
@@ -53,6 +55,15 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting application...")
     
+    monitoring_cfg = load_monitoring_config()
+    mon = (monitoring_cfg or {}).get("monitoring", {}) or {}
+    ph = (monitoring_cfg or {}).get("price_history", {}) or {}
+    update_interval_hours = int(mon.get("update_interval_hours", 3))
+    days_to_keep = int(ph.get("days_to_keep", 30))
+    logger.info(
+        f"Monitoring config: update_interval_hours={update_interval_hours}, days_to_keep={days_to_keep}"
+    )
+
     # Запускаем основной планировщик (ежедневный полный анализ)
     scheduler = DailyJobScheduler()
     scheduler.start(run_immediately=False)
@@ -62,21 +73,27 @@ async def lifespan(app: FastAPI):
         price_history_repo = PriceHistoryRepositoryImpl()
         frequent_updates_scheduler = FrequentUpdatesScheduler(
             price_history_repository=price_history_repo,
-            update_interval_hours=3
+            update_interval_hours=update_interval_hours
         )
         
         # Добавляем задачу в основной планировщик для частых обновлений
         from apscheduler.triggers.interval import IntervalTrigger
-        scheduler.scheduler.add_job(
+        job = scheduler.scheduler.add_job(
             frequent_updates_scheduler.update_portfolio_tickers,
-            trigger=IntervalTrigger(hours=3),
+            trigger=IntervalTrigger(hours=update_interval_hours),
             id='frequent_updates_job',
             name='Frequent Portfolio Updates (every 3 hours)',
             replace_existing=True
+            ,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=3600
         )
-        logger.info("Frequent updates scheduler started (every 3 hours)")
+        logger.info(
+            f"Frequent updates job scheduled: every {update_interval_hours}h, next_run={job.next_run_time}"
+        )
     except Exception as e:
-        logger.warning(f"Could not start frequent updates scheduler: {e}")
+        logger.exception(f"Could not start frequent updates scheduler: {e}")
         frequent_updates_scheduler = None
     
     logger.info("Application started successfully")
@@ -94,7 +111,15 @@ async def lifespan(app: FastAPI):
     if frequent_updates_scheduler:
         # Очистка старых snapshots (оставляем последние 30 дней)
         try:
-            deleted = frequent_updates_scheduler.price_history_repo.cleanup_old(days_to_keep=30)
+            # Берём срок хранения из monitoring.yaml (если доступно)
+            try:
+                cfg = getattr(frequent_updates_scheduler, "monitoring_cfg", None) or {}
+                ph_cfg = (cfg or {}).get("price_history", {}) or {}
+                days = int(ph_cfg.get("days_to_keep", 30))
+            except Exception:
+                days = 30
+
+            deleted = frequent_updates_scheduler.price_history_repo.cleanup_old(days_to_keep=days)
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old price snapshots")
         except Exception as e:
@@ -301,6 +326,34 @@ async def run_job_now(
             "ok": False,
             "error": str(e)
         }
+
+
+@app.get("/scheduler/frequent/history")
+async def frequent_updates_history(limit: int = Query(default=50, ge=1, le=500)):
+    """Последние записи журнала запусков частой джобы."""
+    items = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
+    return {"ok": True, "data": {"items": items, "count": len(items)}}
+
+
+@app.get("/scheduler/daily/history")
+async def daily_job_history(limit: int = Query(default=50, ge=1, le=500)):
+    """Последние записи журнала запусков ежедневной джобы."""
+    items = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
+    return {"ok": True, "data": {"items": items, "count": len(items)}}
+
+
+@app.get("/scheduler/history")
+async def scheduler_history(limit: int = Query(default=50, ge=1, le=500)):
+    """Общий журнал запусков (daily + frequent)."""
+    daily = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
+    frequent = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
+    return {
+        "ok": True,
+        "data": {
+            "daily": {"items": daily, "count": len(daily)},
+            "frequent": {"items": frequent, "count": len(frequent)},
+        },
+    }
 
 
 # === Модуль предсказаний (без префикса /api) ===

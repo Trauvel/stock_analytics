@@ -10,6 +10,7 @@ from loguru import logger
 from app.config.loader import get_config
 from app.process.report import ReportGenerator
 from app.process.report_ddd_adapter import ReportGeneratorDDDAdapter
+from app.utils.job_journal import append_jsonl
 
 
 class DailyJobScheduler:
@@ -50,6 +51,18 @@ class DailyJobScheduler:
         3. Сохранение отчёта в data/analysis.json
         4. Сохранение копии в data/reports/DATE.json
         """
+        run_id = f"daily_job:{datetime.now().isoformat()}"
+        append_jsonl(
+            "data/job_runs/daily_job.jsonl",
+            {
+                "job": "daily_job",
+                "event": "start",
+                "run_id": run_id,
+                "instrument_type": instrument_type,
+                "selected_bonds": selected_bonds,
+            },
+        )
+
         logger.info("=" * 80)
         logger.info(f"STARTING DAILY JOB (instrument_type: {instrument_type}, selected_bonds: {selected_bonds})")
         logger.info("=" * 80)
@@ -85,6 +98,21 @@ class DailyJobScheduler:
             logger.info(f"  Failed: {failed}")
             logger.info(f"  Total signals: {total_signals}")
             logger.info("=" * 80)
+
+            append_jsonl(
+                "data/job_runs/daily_job.jsonl",
+                {
+                    "job": "daily_job",
+                    "event": "finish",
+                    "run_id": run_id,
+                    "success": True,
+                    "duration_seconds": elapsed,
+                    "processed": len(report_dict.get("by_symbol", {})),
+                    "successful": successful,
+                    "failed": failed,
+                    "total_signals": total_signals,
+                },
+            )
             
             return True
             
@@ -97,6 +125,18 @@ class DailyJobScheduler:
             logger.error(f"  Error: {e}")
             logger.error("=" * 80)
             logger.exception("Full traceback:")
+
+            append_jsonl(
+                "data/job_runs/daily_job.jsonl",
+                {
+                    "job": "daily_job",
+                    "event": "finish",
+                    "run_id": run_id,
+                    "success": False,
+                    "duration_seconds": elapsed,
+                    "error": str(e),
+                },
+            )
             
             return False
     

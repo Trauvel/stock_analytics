@@ -5,6 +5,7 @@ from typing import Optional, List
 from loguru import logger
 
 from app.config.loader import get_config
+from app.config.monitoring_loader import load_monitoring_config
 from app.ingest.moex_client import MOEXClient
 # Используем DDD версию MetricsCalculator
 from app.domain.stock_analysis.services.metrics_calculator import MetricsCalculator
@@ -14,6 +15,7 @@ from app.domain.price_history.services.change_analyzer import ChangeAnalyzer
 from app.application.price_history.analyze_changes_use_case import AnalyzeChangesUseCase
 from app.infrastructure.telegram.notifier import TelegramNotifier
 from app.application.telegram.send_notification_use_case import SendNotificationUseCase
+from app.utils.job_journal import append_jsonl
 
 
 class FrequentUpdatesScheduler:
@@ -32,11 +34,27 @@ class FrequentUpdatesScheduler:
             update_interval_hours: Интервал обновления в часах (по умолчанию 3)
         """
         self.config = get_config()
+        self.monitoring_cfg = load_monitoring_config()
         self.client = MOEXClient()
         # Используем DDD версию MetricsCalculator
         self.calculator = MetricsCalculator(dividend_target_pct=self.config.dividend_target_pct)
         self.price_history_repo = price_history_repository
         self.update_interval_hours = update_interval_hours
+
+        mon = (self.monitoring_cfg or {}).get("monitoring", {}) or {}
+        self.price_change_threshold_pct = float(mon.get("price_change_threshold_pct", 3.0))
+        self.volume_spike_threshold = float(mon.get("volume_spike_threshold", 2.0))
+        self.use_adaptive_thresholds = bool(mon.get("use_adaptive_thresholds", True))
+        self.filter_trading_hours = bool(mon.get("filter_trading_hours", True))
+        self.compare_periods = [
+            float(p.get("hours"))
+            for p in (mon.get("compare_periods") or [{"hours": 3}, {"hours": 24}])
+            if isinstance(p, dict) and p.get("hours") is not None
+        ] or [3.0, 24.0]
+
+        notif = (self.monitoring_cfg or {}).get("notifications", {}) or {}
+        self.group_notifications = bool(notif.get("group_notifications", True))
+        self.min_priority = str(notif.get("min_priority", "LOW")).upper()
         
         # Инициализируем use cases
         self.save_snapshot_use_case = SaveSnapshotUseCase(price_history_repository)
@@ -44,9 +62,9 @@ class FrequentUpdatesScheduler:
         # Инициализируем анализатор изменений
         self.change_analyzer = ChangeAnalyzer(
             price_history_repository=price_history_repository,
-            price_change_threshold_pct=3.0,
-            volume_spike_threshold=2.0,
-            use_adaptive_thresholds=True
+            price_change_threshold_pct=self.price_change_threshold_pct,
+            volume_spike_threshold=self.volume_spike_threshold,
+            use_adaptive_thresholds=self.use_adaptive_thresholds
         )
         
         self.analyze_changes_use_case = AnalyzeChangesUseCase(self.change_analyzer)
@@ -133,6 +151,19 @@ class FrequentUpdatesScheduler:
         Returns:
             Dict с результатами обновления
         """
+        run_id = f"frequent_updates:{datetime.now().isoformat()}"
+        append_jsonl(
+            "data/job_runs/frequent_updates.jsonl",
+            {
+                "job": "frequent_updates",
+                "event": "start",
+                "run_id": run_id,
+                "interval_hours": self.update_interval_hours,
+                "compare_periods": self.compare_periods,
+                "filter_trading_hours": self.filter_trading_hours,
+            },
+        )
+
         logger.info("=" * 80)
         logger.info("STARTING FREQUENT UPDATE JOB")
         logger.info("=" * 80)
@@ -144,6 +175,19 @@ class FrequentUpdatesScheduler:
         
         if not tickers:
             logger.warning("No tickers found in portfolio. Skipping update.")
+            append_jsonl(
+                "data/job_runs/frequent_updates.jsonl",
+                {
+                    "job": "frequent_updates",
+                    "event": "finish",
+                    "run_id": run_id,
+                    "success": False,
+                    "processed": 0,
+                    "successful": 0,
+                    "failed": 0,
+                    "error": "No tickers in portfolio",
+                },
+            )
             return {
                 'success': False,
                 'processed': 0,
@@ -217,20 +261,52 @@ class FrequentUpdatesScheduler:
                 logger.info("Analyzing price changes...")
                 signals = self.analyze_changes_use_case.execute(
                     symbols=[t for t in tickers],  # Только успешно обновлённые
-                    compare_periods=[3.0, 24.0]
+                    compare_periods=self.compare_periods,
+                    filter_trading_hours=self.filter_trading_hours,
                 )
                 logger.info(f"Found {len(signals)} significant changes")
                 
                 # Отправляем уведомления в Telegram (если есть сигналы и бот настроен)
                 if signals and self.send_notification_use_case:
                     try:
-                        sent_count = self.send_notification_use_case.execute(signals, group=True)
+                        # Фильтр по минимальному приоритету (LOW/MEDIUM/HIGH)
+                        try:
+                            from app.domain.price_history.value_objects.change_signal import SignalPriority
+                            order = {
+                                SignalPriority.LOW: 0,
+                                SignalPriority.MEDIUM: 1,
+                                SignalPriority.HIGH: 2,
+                            }
+                            min_p = SignalPriority(self.min_priority)
+                            signals_to_send = [s for s in signals if order.get(s.priority, 0) >= order[min_p]]
+                        except Exception:
+                            signals_to_send = signals
+
+                        sent_count = self.send_notification_use_case.execute(
+                            signals_to_send,
+                            group=self.group_notifications,
+                        )
                         logger.info(f"Sent {sent_count} Telegram notification(s)")
                     except Exception as e:
                         logger.error(f"Error sending Telegram notifications: {e}")
                         
             except Exception as e:
                 logger.error(f"Error analyzing changes: {e}")
+
+        append_jsonl(
+            "data/job_runs/frequent_updates.jsonl",
+            {
+                "job": "frequent_updates",
+                "event": "finish",
+                "run_id": run_id,
+                "success": True,
+                "processed": len(tickers),
+                "successful": successful,
+                "failed": failed,
+                "duration_seconds": elapsed,
+                "signals_count": len(signals),
+            },
+        )
         
         return {
             'success': True,
