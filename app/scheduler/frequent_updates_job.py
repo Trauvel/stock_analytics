@@ -52,6 +52,12 @@ class FrequentUpdatesScheduler:
             if isinstance(p, dict) and p.get("hours") is not None
         ] or [3.0, 24.0]
 
+        # Свечи: кэш/глубина/период
+        self.candles_cache_enabled = bool(mon.get("candles_cache_enabled", True))
+        self.candles_cache_refresh_days = int(mon.get("candles_cache_refresh_days", 7))
+        self.candles_period_minutes = int(mon.get("candles_period_minutes", 60))
+        self.candles_days_frequent = int(mon.get("candles_days_frequent", 400))
+
         notif = (self.monitoring_cfg or {}).get("notifications", {}) or {}
         self.group_notifications = bool(notif.get("group_notifications", True))
         self.min_priority = str(notif.get("min_priority", "LOW")).upper()
@@ -161,6 +167,8 @@ class FrequentUpdatesScheduler:
                 "interval_hours": self.update_interval_hours,
                 "compare_periods": self.compare_periods,
                 "filter_trading_hours": self.filter_trading_hours,
+                "candles_days": self.candles_days_frequent,
+                "candles_cache": self.candles_cache_enabled,
             },
         )
 
@@ -208,7 +216,19 @@ class FrequentUpdatesScheduler:
                 # Получаем данные с MOEX
                 quote = self.client.get_quote(symbol)
                 divs = self.client.get_dividends(symbol)
-                candles = self.client.get_candles(symbol, days=400)
+                if self.candles_cache_enabled:
+                    candles = self.client.get_candles_cached(
+                        symbol,
+                        days=self.candles_days_frequent,
+                        refresh_days=self.candles_cache_refresh_days,
+                        period_minutes=self.candles_period_minutes,
+                    )
+                else:
+                    candles = self.client.get_candles(
+                        symbol,
+                        days=self.candles_days_frequent,
+                        period_minutes=self.candles_period_minutes,
+                    )
                 
                 # Рассчитываем метрики
                 metrics = self.calculator.calculate_all_metrics(

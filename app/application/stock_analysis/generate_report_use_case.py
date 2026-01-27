@@ -8,6 +8,7 @@ from app.domain.stock_analysis.entities.stock import Stock
 from app.domain.stock_analysis.repositories.stock_repository import StockRepository
 from app.domain.stock_analysis.services.metrics_calculator import MetricsCalculator
 from app.ingest.moex_client import MOEXClient
+from app.config.monitoring_loader import load_monitoring_config
 
 
 class GenerateReportUseCase:
@@ -33,6 +34,13 @@ class GenerateReportUseCase:
         self._metrics_calc = metrics_calculator
         self._moex_client = moex_client
         self._dividend_target_pct = dividend_target_pct
+
+        cfg = load_monitoring_config()
+        mon = (cfg or {}).get("monitoring", {}) or {}
+        self._candles_cache_enabled = bool(mon.get("candles_cache_enabled", True))
+        self._candles_cache_refresh_days = int(mon.get("candles_cache_refresh_days", 7))
+        self._candles_period_minutes = int(mon.get("candles_period_minutes", 60))
+        self._candles_days_daily = int(mon.get("candles_days_daily", 400))
     
     async def execute(
         self,
@@ -60,7 +68,19 @@ class GenerateReportUseCase:
         for stock in stocks:
             try:
                 # Получаем свечи для расчёта метрик
-                candles = self._moex_client.get_candles(stock.symbol, days=400)
+                if self._candles_cache_enabled:
+                    candles = self._moex_client.get_candles_cached(
+                        stock.symbol,
+                        days=self._candles_days_daily,
+                        refresh_days=self._candles_cache_refresh_days,
+                        period_minutes=self._candles_period_minutes,
+                    )
+                else:
+                    candles = self._moex_client.get_candles(
+                        stock.symbol,
+                        days=self._candles_days_daily,
+                        period_minutes=self._candles_period_minutes,
+                    )
                 
                 # Обогащаем метриками
                 enriched = self._metrics_calc.enrich_stock_with_metrics(stock, candles)

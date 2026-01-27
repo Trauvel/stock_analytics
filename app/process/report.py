@@ -162,7 +162,33 @@ class ReportGenerator:
             # Получаем данные с MOEX
             quote = self.client.get_quote(symbol)
             divs = self.client.get_dividends(symbol)
-            candles = self.client.get_candles(symbol, days=400)
+            try:
+                from app.config.monitoring_loader import load_monitoring_config
+                cfg = load_monitoring_config()
+                mon = (cfg or {}).get("monitoring", {}) or {}
+                cache_enabled = bool(mon.get("candles_cache_enabled", True))
+                refresh_days = int(mon.get("candles_cache_refresh_days", 7))
+                period_minutes = int(mon.get("candles_period_minutes", 60))
+                candles_days_daily = int(mon.get("candles_days_daily", 400))
+            except Exception:
+                cache_enabled = True
+                refresh_days = 7
+                period_minutes = 60
+                candles_days_daily = 400
+
+            if cache_enabled:
+                candles = self.client.get_candles_cached(
+                    symbol,
+                    days=candles_days_daily,
+                    refresh_days=refresh_days,
+                    period_minutes=period_minutes,
+                )
+            else:
+                candles = self.client.get_candles(
+                    symbol,
+                    days=candles_days_daily,
+                    period_minutes=period_minutes,
+                )
             
             # Рассчитываем метрики
             metrics = self.calculator.calculate_all_metrics(

@@ -8,6 +8,7 @@ import pandas as pd
 from loguru import logger
 from tenacity import retry, stop_after_attempt, wait_exponential, retry_if_exception_type
 import moexalgo
+from pathlib import Path
 
 from app.config.loader import get_config
 
@@ -34,6 +35,41 @@ class MOEXClient:
         """Пауза для соблюдения rate limit."""
         if self.rate_limit_sleep > 0:
             time.sleep(self.rate_limit_sleep)
+
+    def _fetch_candles_range(
+        self,
+        symbol: str,
+        start_date: datetime,
+        end_date: datetime,
+        period_minutes: int = 60,
+    ) -> pd.DataFrame:
+        """
+        Получить свечи за диапазон дат.
+
+        Для акций/тикеров: moexalgo.
+        Для облигаций (ISIN): ISS API (внутри _get_candles_via_iss).
+        """
+        # Проверяем, является ли symbol ISIN
+        is_isin = len(symbol) == 12 and symbol[:2].isalpha()
+
+        if is_isin:
+            candles = self._get_candles_via_iss(symbol, start_date, end_date)
+        else:
+            ticker_obj = moexalgo.Ticker(symbol)
+            candles = ticker_obj.candles(
+                start=start_date.strftime('%Y-%m-%d'),
+                end=end_date.strftime('%Y-%m-%d'),
+                period=period_minutes,
+            )
+
+            # moexalgo иногда возвращает генератор
+            if hasattr(candles, '__iter__') and not isinstance(candles, pd.DataFrame):
+                candles_list = list(candles)
+                if not candles_list:
+                    return pd.DataFrame()
+                candles = pd.DataFrame(candles_list)
+
+        return candles
     
     @retry(
         stop=stop_after_attempt(3),
@@ -635,7 +671,10 @@ class MOEXClient:
         self,
         symbol: str,
         days: int = 400,
-        interval: str = '24h'
+        interval: str = '24h',
+        start_date: Optional[datetime] = None,
+        end_date: Optional[datetime] = None,
+        period_minutes: int = 60,
     ) -> pd.DataFrame:
         """
         Получить исторические свечи по тикеру.
@@ -644,6 +683,9 @@ class MOEXClient:
             symbol: Тикер инструмента
             days: Количество дней истории (по умолчанию 400 для 52 недель + запас)
             interval: Интервал свечей ('24h' для дневных)
+            start_date: Явная начальная дата (если задана, параметр days игнорируется)
+            end_date: Явная конечная дата (если задана, иначе now())
+            period_minutes: Для тикеров (не ISIN) период moexalgo (по умолчанию 60 = 1 час)
             
         Returns:
             pd.DataFrame: Свечи с колонками [open, high, low, close, volume, begin, end]
@@ -652,36 +694,21 @@ class MOEXClient:
             MOEXClientError: Если не удалось получить данные
         """
         try:
-            logger.info(f"Fetching {days} days of candles for {symbol}")
-            
             # Вычисляем даты
-            end_date = datetime.now()
-            start_date = end_date - timedelta(days=days)
-            
-            # Проверяем, является ли symbol ISIN
-            is_isin = len(symbol) == 12 and symbol[:2].isalpha()
-            
-            if is_isin:
-                # Для облигаций (ISIN) используем ISS API
-                candles = self._get_candles_via_iss(symbol, start_date, end_date)
-            else:
-                # Для обычных тикеров используем moexalgo
-                ticker_obj = moexalgo.Ticker(symbol)
-                
-                # Используем hourly candles (период 60) вместо daily
-                candles = ticker_obj.candles(
-                    start=start_date.strftime('%Y-%m-%d'),
-                    end=end_date.strftime('%Y-%m-%d'),
-                    period=60  # 1 hour
-                )
-                
-                # Проверяем, является ли результат генератором
-                if hasattr(candles, '__iter__') and not isinstance(candles, pd.DataFrame):
-                    # Преобразуем генератор в список, затем в DataFrame
-                    candles_list = list(candles)
-                    if not candles_list:
-                        raise MOEXClientError(f"No candles data for {symbol}")
-                    candles = pd.DataFrame(candles_list)
+            eff_end = end_date or datetime.now()
+            eff_start = start_date or (eff_end - timedelta(days=days))
+
+            logger.info(
+                f"Fetching candles for {symbol}: {eff_start.strftime('%Y-%m-%d')}..{eff_end.strftime('%Y-%m-%d')} "
+                f"(days={days}, period_minutes={period_minutes})"
+            )
+
+            candles = self._fetch_candles_range(
+                symbol=symbol,
+                start_date=eff_start,
+                end_date=eff_end,
+                period_minutes=period_minutes,
+            )
             
             if candles.empty:
                 raise MOEXClientError(f"No candles data for {symbol}")
@@ -719,6 +746,82 @@ class MOEXClient:
         except Exception as e:
             logger.error(f"Error fetching candles for {symbol}: {e}")
             raise MOEXClientError(f"Failed to fetch candles for {symbol}: {e}")
+
+    def get_candles_cached(
+        self,
+        symbol: str,
+        days: int = 400,
+        refresh_days: int = 7,
+        cache_dir: str = "data/candles_cache",
+        period_minutes: int = 60,
+    ) -> pd.DataFrame:
+        """
+        Получить свечи с кэшем + инкрементальной докачкой.
+
+        Идея: один раз скачали историю, дальше докачиваем только хвост (последние refresh_days),
+        склеиваем с кэшем, удаляем дубликаты по begin, и храним окно последних `days` календарных дней.
+        """
+        try:
+            root = Path(__file__).parent.parent.parent
+            cache_path = root / cache_dir / f"{symbol}.parquet"
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+
+            cached: Optional[pd.DataFrame] = None
+            if cache_path.exists():
+                try:
+                    cached = pd.read_parquet(cache_path)
+                except Exception:
+                    # fallback: возможно ранее сохраняли в csv
+                    csv_path = cache_path.with_suffix(".csv")
+                    if csv_path.exists():
+                        cached = pd.read_csv(csv_path)
+                    else:
+                        cached = None
+
+            now = datetime.now()
+
+            if cached is None or cached.empty or "begin" not in cached.columns:
+                df = self.get_candles(symbol=symbol, days=days, period_minutes=period_minutes)
+            else:
+                cached = cached.copy()
+                cached["begin"] = pd.to_datetime(cached["begin"])
+                cached["end"] = pd.to_datetime(cached["end"]) if "end" in cached.columns else cached["begin"]
+
+                last_begin = cached["begin"].max()
+                # Докачиваем хвост с небольшим overlap, чтобы не потерять свечи на границе
+                fetch_from = max(now - timedelta(days=days), last_begin.to_pydatetime() - timedelta(days=refresh_days))
+                fetch_to = now
+
+                df_new = self.get_candles(
+                    symbol=symbol,
+                    start_date=fetch_from,
+                    end_date=fetch_to,
+                    days=days,  # не используется при start_date
+                    period_minutes=period_minutes,
+                )
+
+                df = pd.concat([cached, df_new], ignore_index=True) if not df_new.empty else cached
+                if "begin" in df.columns:
+                    df["begin"] = pd.to_datetime(df["begin"])
+                    # Дубликаты по begin
+                    df = df.sort_values("begin").drop_duplicates(subset=["begin"], keep="last").reset_index(drop=True)
+
+                # Обрезаем окно до последних `days` календарных дней
+                cutoff = now - timedelta(days=days)
+                if "begin" in df.columns:
+                    df = df[df["begin"] >= cutoff].reset_index(drop=True)
+
+            # Сохраняем кэш (parquet предпочтительнее)
+            try:
+                df.to_parquet(cache_path, index=False)
+            except Exception as e:
+                logger.warning(f"Could not write parquet cache {cache_path}: {e}, writing csv")
+                df.to_csv(cache_path.with_suffix(".csv"), index=False)
+
+            return df
+        except Exception as e:
+            logger.warning(f"Candles cache failed for {symbol}: {e}. Falling back to direct fetch.")
+            return self.get_candles(symbol=symbol, days=days, period_minutes=period_minutes)
     
     def get_all_data(self, symbol: str) -> Dict[str, Any]:
         """

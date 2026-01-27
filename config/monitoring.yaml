@@ -8,6 +8,12 @@ telegram:
 # Настройки мониторинга
 monitoring:
   update_interval_hours: 3  # Интервал обновления данных (3 или 4 часа)
+  # Свечи: глубина истории и кэш
+  candles_cache_enabled: true
+  candles_cache_refresh_days: 7   # сколько дней "хвоста" докачивать при каждом запуске
+  candles_period_minutes: 60      # период moexalgo для тикеров (60 = 1 час)
+  candles_days_daily: 400         # глубина свечей для ежедневного анализа
+  candles_days_frequent: 400      # глубина свечей для интервальной джобы (можно уменьшить, если нужно)
   price_change_threshold_pct: 3.0  # Минимальное изменение цены для уведомления (%)
   volume_spike_threshold: 2.0  # Порог всплеска объёма (во сколько раз больше среднего)
   use_adaptive_thresholds: true  # Использовать адаптивные пороги на основе волатильности

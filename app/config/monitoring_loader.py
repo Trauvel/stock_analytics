@@ -13,6 +13,11 @@ DEFAULT_MONITORING_CONFIG: Dict[str, Any] = {
     "telegram": {"enabled": True},
     "monitoring": {
         "update_interval_hours": 3,
+        "candles_cache_enabled": True,
+        "candles_cache_refresh_days": 7,
+        "candles_period_minutes": 60,
+        "candles_days_daily": 400,
+        "candles_days_frequent": 400,
         "price_change_threshold_pct": 3.0,
         "volume_spike_threshold": 2.0,
         "use_adaptive_thresholds": True,

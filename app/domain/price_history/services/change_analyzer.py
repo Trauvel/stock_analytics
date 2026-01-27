@@ -141,10 +141,14 @@ class ChangeAnalyzer:
             # Анализируем объём
             volume_spike = False
             volume_multiplier = None
+            volume_before = None
+            volume_after = None
             if current_snapshot.volume and previous_snapshot.volume:
                 if previous_snapshot.volume > 0:
                     volume_multiplier = current_snapshot.volume / previous_snapshot.volume
                     volume_spike = volume_multiplier >= self.volume_spike_threshold
+                    volume_before = float(previous_snapshot.volume)
+                    volume_after = float(current_snapshot.volume)
             
             # Определяем приоритет
             priority = self._determine_priority(
@@ -159,6 +163,14 @@ class ChangeAnalyzer:
                 volume_spike=volume_spike,
                 rsi=current_snapshot.rsi
             )
+
+            # Контекстные метрики (для более информативного сообщения)
+            price_vs_sma200_pct = None
+            if current_snapshot.sma_200 and current_snapshot.sma_200 > 0:
+                try:
+                    price_vs_sma200_pct = ((current_snapshot.price - current_snapshot.sma_200) / current_snapshot.sma_200) * 100
+                except Exception:
+                    price_vs_sma200_pct = None
             
             signal = ChangeSignal(
                 symbol=symbol,
@@ -172,7 +184,16 @@ class ChangeAnalyzer:
                 recommendation=recommendation,
                 timestamp=current_snapshot.timestamp,
                 volume_multiplier=volume_multiplier,
-                rsi=current_snapshot.rsi
+                volume_before=volume_before,
+                volume_after=volume_after,
+                rsi=current_snapshot.rsi,
+                atr=current_snapshot.atr,
+                dy_pct=current_snapshot.dy_pct,
+                sma_20=current_snapshot.sma_20,
+                sma_50=current_snapshot.sma_50,
+                sma_200=current_snapshot.sma_200,
+                price_vs_sma200_pct=price_vs_sma200_pct,
+                threshold_used_pct=adaptive_threshold,
             )
             
             logger.info(f"Generated change signal for {symbol}: {direction.value} {price_change_pct:.2f}% "

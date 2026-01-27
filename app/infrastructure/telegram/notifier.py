@@ -246,7 +246,9 @@ class TelegramNotifier:
             SignalPriority.LOW: "🟢"
         }.get(signal.priority, "⚪")
         
-        message = f"{emoji} <b>{signal.symbol}</b>: "
+        message = f"{emoji} <b>{signal.symbol}</b> "
+        # Окно сравнения
+        message += f"<i>({signal.hours_ago:.0f}ч)</i>: "
         
         if signal.direction.value == "DOWN":
             message += f"Цена снизилась на <b>{abs(signal.price_change_pct):.2f}%</b>\n"
@@ -256,12 +258,36 @@ class TelegramNotifier:
             message += f"💰 Было: {signal.price_before:.2f}₽ → Стало: {signal.price_after:.2f}₽\n"
         else:
             message += f"Цена изменилась на {signal.price_change_pct:.2f}%\n"
+
+        # Порог срабатывания
+        if signal.threshold_used_pct is not None:
+            message += f"🎯 Порог: {signal.threshold_used_pct:.2f}%\n"
         
         # Объём
         if signal.volume_spike:
-            message += f"📊 Объём: {signal.volume_multiplier:.1f}x от среднего (высокий)\n"
+            if signal.volume_multiplier is not None:
+                message += f"📊 Объём: {signal.volume_multiplier:.1f}x (высокий)\n"
+            else:
+                message += f"📊 Объём: высокий\n"
         else:
             message += f"📊 Объём: нормальный\n"
+
+        if signal.volume_after is not None and signal.volume_before is not None:
+            message += f"   └ {signal.volume_before:.0f} → {signal.volume_after:.0f}\n"
+
+        # SMA (контекст тренда)
+        if signal.sma_200 is not None:
+            if signal.price_vs_sma200_pct is not None:
+                side = "выше" if signal.price_vs_sma200_pct >= 0 else "ниже"
+                message += f"📏 SMA200: {signal.sma_200:.2f}₽ (цена {side} на {abs(signal.price_vs_sma200_pct):.1f}%)\n"
+            else:
+                message += f"📏 SMA200: {signal.sma_200:.2f}₽\n"
+        else:
+            # Если SMA200 нет, но есть SMA20/50 — тоже полезно
+            if signal.sma_50 is not None:
+                message += f"📏 SMA50: {signal.sma_50:.2f}₽\n"
+            if signal.sma_20 is not None:
+                message += f"📏 SMA20: {signal.sma_20:.2f}₽\n"
         
         # RSI
         if signal.rsi is not None:
@@ -271,6 +297,14 @@ class TelegramNotifier:
                 message += f"📈 RSI: {signal.rsi:.1f} (перекупленность)\n"
             else:
                 message += f"📈 RSI: {signal.rsi:.1f}\n"
+
+        # ATR (волатильность)
+        if signal.atr is not None:
+            message += f"🌪️ ATR: {signal.atr:.2f}\n"
+
+        # DY/купон
+        if signal.dy_pct is not None:
+            message += f"💵 DY: {signal.dy_pct:.2f}%\n"
         
         # Рекомендация
         message += f"💡 <b>{signal.recommendation}</b>\n"
