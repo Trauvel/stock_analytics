@@ -743,17 +743,44 @@ async function loadJobJournal() {
     if (dailyBody) dailyBody.innerHTML = '<tr><td colspan="7" class="text-muted">Загрузка...</td></tr>';
     if (frequentBody) frequentBody.innerHTML = '<tr><td colspan="8" class="text-muted">Загрузка...</td></tr>';
 
+    const nextDailyRun = document.getElementById('next-daily-run');
+    const nextFrequentRun = document.getElementById('next-frequent-run');
+    const nextDailyTrigger = document.getElementById('next-daily-trigger');
+    const nextFrequentTrigger = document.getElementById('next-frequent-trigger');
+    if (nextDailyRun) nextDailyRun.textContent = 'Загрузка...';
+    if (nextFrequentRun) nextFrequentRun.textContent = 'Загрузка...';
+    if (nextDailyTrigger) nextDailyTrigger.textContent = '—';
+    if (nextFrequentTrigger) nextFrequentTrigger.textContent = '—';
+
     try {
-        const [dailyResp, freqResp] = await Promise.all([
+        const [dailyResp, freqResp, statusResp] = await Promise.all([
             fetch(`/scheduler/daily/history?limit=${limit}`),
-            fetch(`/scheduler/frequent/history?limit=${limit}`)
+            fetch(`/scheduler/frequent/history?limit=${limit}`),
+            fetch(`/scheduler/status`)
         ]);
 
         const dailyData = await dailyResp.json();
         const freqData = await freqResp.json();
+        const statusData = await statusResp.json();
 
         const dailyItems = dailyData?.data?.items || [];
         const freqItems = freqData?.data?.items || [];
+
+        // Следующие запуски
+        if (statusData?.ok && statusData?.data?.jobs) {
+            const jobs = statusData.data.jobs || [];
+            const dailyJob = jobs.find(j => j.id === 'daily_report_job');
+            const frequentJob = jobs.find(j => j.id === 'frequent_updates_job');
+
+            if (nextDailyRun) nextDailyRun.textContent = dailyJob?.next_run_time ? _fmtTs(dailyJob.next_run_time) : 'N/A';
+            if (nextDailyTrigger) nextDailyTrigger.textContent = dailyJob?.trigger || '—';
+
+            if (nextFrequentRun) nextFrequentRun.textContent = frequentJob?.next_run_time ? _fmtTs(frequentJob.next_run_time) : 'N/A';
+            if (nextFrequentTrigger) nextFrequentTrigger.textContent = frequentJob?.trigger || '—';
+        } else {
+            if (nextDailyRun) nextDailyRun.textContent = 'N/A';
+            if (nextFrequentRun) nextFrequentRun.textContent = 'N/A';
+        }
 
         if (dailyBody) {
             if (!dailyItems.length) {
@@ -810,6 +837,8 @@ async function loadJobJournal() {
         console.error('Error loading job journal:', e);
         if (dailyBody) dailyBody.innerHTML = '<tr><td colspan="7" class="text-danger">Ошибка загрузки журнала.</td></tr>';
         if (frequentBody) frequentBody.innerHTML = '<tr><td colspan="8" class="text-danger">Ошибка загрузки журнала.</td></tr>';
+        if (nextDailyRun) nextDailyRun.textContent = 'Ошибка';
+        if (nextFrequentRun) nextFrequentRun.textContent = 'Ошибка';
     }
 }
 
