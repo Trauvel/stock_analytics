@@ -1,6 +1,7 @@
 """FastAPI сервер для доступа к данным анализа."""
 
 from datetime import datetime
+import os
 from typing import Dict, Any, List, Optional
 from pathlib import Path
 import yaml
@@ -38,6 +39,30 @@ from app.api.dependencies import (
     get_list_portfolios_use_case,
     get_create_portfolio_use_case,
     get_delete_portfolio_use_case
+)
+
+# === Auth / Users ===
+from fastapi import Response, Cookie
+from app.infrastructure.auth.security import hash_password, verify_password
+from app.infrastructure.auth.repositories import (
+    ensure_db_safe,
+    get_user_by_username,
+    create_user,
+    create_session,
+    delete_session,
+    set_last_login,
+)
+from app.infrastructure.auth.repositories import (
+    create_telegram_link_code,
+    get_telegram_link,
+    upsert_telegram_link,
+)
+from app.infrastructure.auth.dependencies import (
+    SESSION_COOKIE_NAME,
+    users_auth_enabled,
+    get_current_user,
+    require_user,
+    require_admin,
 )
 
 
@@ -101,6 +126,192 @@ from app.api.dependencies import (
     get_import_sber_html_use_case
 )
 container.wire(modules=[__name__])
+
+# Пытаемся инициализировать БД для auth (в реальном окружении это создаст data/app.db)
+ensure_db_safe()
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class RegisterRequest(BaseModel):
+    invite_code: str
+    username: str
+    password: str
+
+
+class CreateInviteRequest(BaseModel):
+    role: str = "user"
+    expires_days: int = 7
+
+
+@app.get("/auth/me")
+async def auth_me(user=Depends(get_current_user)):
+    if not users_auth_enabled():
+        return {"ok": True, "data": {"enabled": False}}
+    if not user:
+        return {"ok": True, "data": {"enabled": True, "authenticated": False}}
+    return {
+        "ok": True,
+        "data": {
+            "enabled": True,
+            "authenticated": True,
+            "user": {"id": user.id, "username": user.username, "role": user.role},
+        },
+    }
+
+
+@app.post("/auth/login")
+async def auth_login(payload: LoginRequest, response: Response):
+    if not users_auth_enabled():
+        return {"ok": False, "error": "Users auth is disabled (set AUTH_USERS_ENABLED=true)"}
+
+    user = get_user_by_username(payload.username)
+    if not user or not user.is_active:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    if not verify_password(payload.password, user.password_hash):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+    sid = create_session(user.id, ttl_days=int(os.getenv("AUTH_SESSION_DAYS", "30")))
+    set_last_login(user.id)
+
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=sid,
+        httponly=True,
+        samesite="lax",
+        secure=os.getenv("AUTH_COOKIE_SECURE", "false").lower() == "true",
+        path="/",
+    )
+    return {"ok": True, "message": "Logged in", "data": {"user": {"id": user.id, "username": user.username, "role": user.role}}}
+
+
+@app.post("/auth/logout")
+async def auth_logout(
+    response: Response,
+    session_id: Optional[str] = Cookie(default=None, alias=SESSION_COOKIE_NAME),
+):
+    if users_auth_enabled() and session_id:
+        delete_session(session_id)
+    response.delete_cookie(key=SESSION_COOKIE_NAME, path="/")
+    return {"ok": True, "message": "Logged out"}
+
+
+@app.post("/auth/register")
+async def auth_register(payload: RegisterRequest):
+    """
+    Регистрация пользователя по приглашению.
+    """
+    if not users_auth_enabled():
+        return {"ok": False, "error": "Users auth is disabled (set AUTH_USERS_ENABLED=true)"}
+
+    from datetime import datetime, timezone
+    from app.infrastructure.auth.repositories import get_invite, mark_invite_used
+
+    inv = get_invite(payload.invite_code)
+    if not inv:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid invite code")
+    if inv.get("used_at"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite code already used")
+
+    try:
+        exp = datetime.fromisoformat(str(inv["expires_at"]).replace("Z", "+00:00"))
+        if exp <= datetime.now(timezone.utc):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite code expired")
+    except HTTPException:
+        raise
+    except Exception:
+        # Если формат странный — считаем невалидным
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invite code expired")
+
+    if get_user_by_username(payload.username):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Username already exists")
+
+    role = str(inv.get("role") or "user")
+    u = create_user(payload.username, hash_password(payload.password), role=role)
+    mark_invite_used(payload.invite_code, u.id)
+
+    return {"ok": True, "message": "Registered", "data": {"user": {"id": u.id, "username": u.username, "role": u.role}}}
+
+
+@app.post("/admin/invites")
+async def admin_create_invite(payload: CreateInviteRequest, user=Depends(require_admin)):
+    """
+    Создать инвайт (admin-only).
+    """
+    from datetime import datetime, timedelta
+    from app.infrastructure.auth.repositories import create_invite
+
+    role = payload.role.lower().strip()
+    if role not in ("user", "admin"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="role must be user|admin")
+
+    expires_days = int(payload.expires_days)
+    if expires_days < 1 or expires_days > 365:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="expires_days must be 1..365")
+
+    exp = (datetime.utcnow() + timedelta(days=expires_days)).replace(microsecond=0).isoformat() + "Z"
+    code = create_invite(role=role, expires_at=exp)
+    return {"ok": True, "data": {"code": code, "role": role, "expires_at": exp}}
+
+
+class TelegramLinkCodeResponse(BaseModel):
+    ok: bool
+    data: Optional[Dict[str, Any]] = None
+    error: Optional[str] = None
+
+
+@app.post("/telegram/link-code")
+async def telegram_create_link_code(user=Depends(require_user)):
+    """
+    Создать одноразовый код привязки Telegram (пользовательский).
+    """
+    from datetime import datetime, timedelta
+
+    exp = (datetime.utcnow() + timedelta(minutes=15)).replace(microsecond=0).isoformat() + "Z"
+    code = create_telegram_link_code(user_id=user.id, expires_at=exp)
+    return {
+        "ok": True,
+        "data": {
+            "code": code,
+            "expires_at": exp,
+            "instruction": "Откройте чат с ботом и отправьте: /link <code>",
+        },
+    }
+
+
+@app.get("/telegram/status")
+async def telegram_status(user=Depends(require_user)):
+    rec = get_telegram_link(user.id)
+    if not rec:
+        return {"ok": True, "data": {"linked": False}}
+    return {
+        "ok": True,
+        "data": {
+            "linked": True,
+            "chat_id": rec.get("chat_id"),
+            "enabled": bool(rec.get("enabled")),
+            "min_priority": rec.get("min_priority"),
+            "verified_at": rec.get("verified_at"),
+        },
+    }
+
+
+@app.post("/telegram/test")
+async def telegram_test(user=Depends(require_user)):
+    rec = get_telegram_link(user.id)
+    if not rec:
+        raise HTTPException(status_code=400, detail="Telegram not linked")
+    chat_id = rec.get("chat_id")
+    try:
+        from app.infrastructure.telegram.notifier import TelegramNotifier
+        notifier = TelegramNotifier()
+        ok = notifier.send_notification("✅ Тестовое сообщение от Stock Analytics", chat_id=str(chat_id))
+        return {"ok": ok, "message": "sent" if ok else "failed"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 @app.get("/", response_class=HTMLResponse)
 async def root():

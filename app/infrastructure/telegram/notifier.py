@@ -53,10 +53,11 @@ class TelegramNotifier:
         self._bot = None
         self._initialized = False
         
-        if self.bot_token and self.chat_id:
+        # В режиме multi-user chat_id может быть per-user. Поэтому инициализируемся по bot_token.
+        if self.bot_token:
             self._initialize_bot()
         else:
-            logger.warning("Telegram bot token or chat_id not provided. Notifications will be disabled.")
+            logger.warning("Telegram bot token not provided. Notifications will be disabled.")
     
     def _initialize_bot(self) -> None:
         """Инициализировать Telegram бота."""
@@ -113,19 +114,19 @@ class TelegramNotifier:
             self._initialized = True
             logger.info("Telegram bot initialized successfully")
             
-            # Проверяем доступность чата перед отправкой уведомления
-            if self.check_chat_access():
-                # Отправляем уведомление о запуске сервера
-                try:
-                    startup_message = "🚀 <b>Stock Analytics Server</b>\n\nСервер успешно запущен и готов к работе!"
-                    if self.send_notification(startup_message):
-                        logger.info("Startup notification sent to Telegram")
-                    else:
-                        logger.warning("Failed to send startup notification")
-                except Exception as e:
-                    logger.warning(f"Could not send startup notification to Telegram: {e}")
-            else:
-                logger.warning("Chat access check failed, skipping startup notification")
+            # Старый режим: если задан TELEGRAM_CHAT_ID — отправим стартовое сообщение
+            if self.chat_id:
+                if self.check_chat_access(chat_id=self.chat_id):
+                    try:
+                        startup_message = "🚀 <b>Stock Analytics Server</b>\n\nСервер успешно запущен и готов к работе!"
+                        if self.send_notification(startup_message, chat_id=self.chat_id):
+                            logger.info("Startup notification sent to Telegram")
+                        else:
+                            logger.warning("Failed to send startup notification")
+                    except Exception as e:
+                        logger.warning(f"Could not send startup notification to Telegram: {e}")
+                else:
+                    logger.warning("Chat access check failed, skipping startup notification")
         except ImportError:
             logger.error("python-telegram-bot not installed. Install it with: pip install python-telegram-bot")
             self._initialized = False
@@ -139,7 +140,7 @@ class TelegramNotifier:
         """Проверить, включены ли уведомления."""
         return self._initialized and self._bot is not None
     
-    def check_chat_access(self) -> bool:
+    def check_chat_access(self, chat_id: Optional[str] = None) -> bool:
         """
         Проверить доступность чата для отправки сообщений.
         
@@ -147,6 +148,9 @@ class TelegramNotifier:
             bool: True если чат доступен
         """
         if not self.is_enabled():
+            return False
+        target_chat_id = str(chat_id) if chat_id else self.chat_id
+        if not target_chat_id:
             return False
         
         try:
@@ -171,14 +175,14 @@ class TelegramNotifier:
                         async def check_with_new_bot():
                             try:
                                 # Пробуем получить информацию о чате
-                                chat = await bot.get_chat(chat_id=self.chat_id)
+                                chat = await bot.get_chat(chat_id=target_chat_id)
                                 logger.info(f"Chat access verified: {chat.type} - {chat.title or chat.first_name or 'N/A'}")
                                 return True
                             except TelegramError as e:
                                 error_msg = str(e)
                                 if "Not Found" in error_msg or "chat not found" in error_msg.lower():
                                     logger.error(
-                                        f"Chat not found. Chat ID: {self.chat_id}\n"
+                                        f"Chat not found. Chat ID: {target_chat_id}\n"
                                         f"Возможные причины:\n"
                                         f"  1. Неправильный chat_id\n"
                                         f"  2. Бот не добавлен в чат/канал\n"
@@ -186,7 +190,7 @@ class TelegramNotifier:
                                         f"  4. Бот был удалён из чата"
                                     )
                                 elif "Forbidden" in error_msg or "bot was blocked" in error_msg.lower():
-                                    logger.error(f"Bot was blocked or removed from chat. Chat ID: {self.chat_id}")
+                                    logger.error(f"Bot was blocked or removed from chat. Chat ID: {target_chat_id}")
                                 else:
                                     logger.error(f"Error checking chat access: {error_msg}")
                                 return False
@@ -317,7 +321,7 @@ class TelegramNotifier:
         
         return message
     
-    def send_notification(self, message: str, parse_mode: str = "HTML") -> bool:
+    def send_notification(self, message: str, parse_mode: str = "HTML", chat_id: Optional[str] = None) -> bool:
         """
         Отправить уведомление в Telegram.
         
@@ -330,6 +334,10 @@ class TelegramNotifier:
         """
         if not self.is_enabled():
             logger.warning("Telegram bot not initialized, skipping notification")
+            return False
+        target_chat_id = str(chat_id) if chat_id else self.chat_id
+        if not target_chat_id:
+            logger.warning("Telegram chat_id not set (per-user). Skipping notification")
             return False
         
         try:
@@ -353,7 +361,7 @@ class TelegramNotifier:
                         
                         async def send_with_new_bot():
                             await bot.send_message(
-                                chat_id=self.chat_id,
+                                chat_id=target_chat_id,
                                 text=message,
                                 parse_mode=parse_mode
                             )
@@ -388,7 +396,7 @@ class TelegramNotifier:
                 return False
             
             if result[0]:
-                logger.info(f"Sent Telegram notification to chat {self.chat_id}")
+                logger.info(f"Sent Telegram notification to chat {target_chat_id}")
             
             return result[0]
             
@@ -421,7 +429,7 @@ class TelegramNotifier:
             logger.debug(traceback.format_exc())
             return False
     
-    def send_signals(self, signals: List[ChangeSignal], group: bool = True) -> int:
+    def send_signals(self, signals: List[ChangeSignal], group: bool = True, chat_id: Optional[str] = None) -> int:
         """
         Отправить сигналы об изменениях в Telegram.
         
@@ -450,13 +458,13 @@ class TelegramNotifier:
                 if i < len(signals):
                     message += "\n"
             
-            if self.send_notification(message):
+            if self.send_notification(message, chat_id=str(chat_id) if chat_id else None):
                 sent_count = 1
         else:
             # Отправляем каждое уведомление отдельно
             for signal in signals:
                 message = self.format_signal_message(signal)
-                if self.send_notification(message):
+                if self.send_notification(message, chat_id=str(chat_id) if chat_id else None):
                     sent_count += 1
         
         return sent_count

@@ -16,6 +16,7 @@ from app.application.price_history.analyze_changes_use_case import AnalyzeChange
 from app.infrastructure.telegram.notifier import TelegramNotifier
 from app.application.telegram.send_notification_use_case import SendNotificationUseCase
 from app.utils.job_journal import append_jsonl
+from app.infrastructure.auth.repositories import list_telegram_links
 
 
 class FrequentUpdatesScheduler:
@@ -169,6 +170,9 @@ class FrequentUpdatesScheduler:
                 "filter_trading_hours": self.filter_trading_hours,
                 "candles_days": self.candles_days_frequent,
                 "candles_cache": self.candles_cache_enabled,
+                "source": "scheduled",
+                "user_id": None,
+                "role": None,
             },
         )
 
@@ -194,6 +198,9 @@ class FrequentUpdatesScheduler:
                     "successful": 0,
                     "failed": 0,
                     "error": "No tickers in portfolio",
+                    "source": "scheduled",
+                    "user_id": None,
+                    "role": None,
                 },
             )
             return {
@@ -302,11 +309,46 @@ class FrequentUpdatesScheduler:
                         except Exception:
                             signals_to_send = signals
 
-                        sent_count = self.send_notification_use_case.execute(
-                            signals_to_send,
-                            group=self.group_notifications,
-                        )
-                        logger.info(f"Sent {sent_count} Telegram notification(s)")
+                        # Multi-user: отправляем всем привязанным чатам (если есть)
+                        links = []
+                        try:
+                            links = list_telegram_links(enabled_only=True)
+                        except Exception:
+                            links = []
+
+                        if links:
+                            total_sent = 0
+                            for link in links:
+                                chat_id = link.get("chat_id")
+                                if not chat_id:
+                                    continue
+                                # per-user min_priority override
+                                try:
+                                    from app.domain.price_history.value_objects.change_signal import SignalPriority
+                                    order = {
+                                        SignalPriority.LOW: 0,
+                                        SignalPriority.MEDIUM: 1,
+                                        SignalPriority.HIGH: 2,
+                                    }
+                                    min_p = SignalPriority(str(link.get("min_priority", "LOW")).upper())
+                                    signals_user = [s for s in signals_to_send if order.get(s.priority, 0) >= order[min_p]]
+                                except Exception:
+                                    signals_user = signals_to_send
+
+                                sent_count = self.send_notification_use_case.execute(
+                                    signals_user,
+                                    group=self.group_notifications,
+                                    chat_id=str(chat_id),
+                                )
+                                total_sent += sent_count
+                            logger.info(f"Sent {total_sent} Telegram notification(s) (multi-user)")
+                        else:
+                            # Legacy: отправляем в TELEGRAM_CHAT_ID если задан
+                            sent_count = self.send_notification_use_case.execute(
+                                signals_to_send,
+                                group=self.group_notifications,
+                            )
+                            logger.info(f"Sent {sent_count} Telegram notification(s)")
                     except Exception as e:
                         logger.error(f"Error sending Telegram notifications: {e}")
                         
@@ -325,6 +367,9 @@ class FrequentUpdatesScheduler:
                 "failed": failed,
                 "duration_seconds": elapsed,
                 "signals_count": len(signals),
+                "source": "scheduled",
+                "user_id": None,
+                "role": None,
             },
         )
         

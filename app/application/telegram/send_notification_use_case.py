@@ -19,7 +19,7 @@ class SendNotificationUseCase:
         """
         self._notifier = telegram_notifier
     
-    def execute(self, signals: List[ChangeSignal], group: bool = True) -> int:
+    def execute(self, signals: List[ChangeSignal], group: bool = True, chat_id: str | None = None) -> int:
         """
         Выполнить use case - отправить уведомления о сигналах.
         
@@ -40,7 +40,7 @@ class SendNotificationUseCase:
         
         logger.info(f"Sending {len(signals)} notifications to Telegram")
         
-        sent_count = self._notifier.send_signals(signals, group=group)
+        sent_count = self._notifier.send_signals(signals, group=group, chat_id=chat_id)
         
         logger.info(f"Sent {sent_count} notification(s) to Telegram")
         

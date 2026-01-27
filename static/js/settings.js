@@ -6,6 +6,64 @@ let currentConfig = null;
 let currentPortfolioId = null;
 let portfoliosList = [];
 
+// === Auth / роли ===
+let AUTH = { enabled: false, authenticated: false, user: null };
+
+async function loadAuthMe() {
+    try {
+        const resp = await fetch(`${API_BASE}/auth/me`);
+        const data = await resp.json();
+        if (!data?.ok) return AUTH;
+        const d = data.data || {};
+        AUTH.enabled = !!d.enabled;
+        AUTH.authenticated = !!d.authenticated;
+        AUTH.user = d.user || null;
+        return AUTH;
+    } catch (e) {
+        console.warn('auth/me failed:', e);
+        return AUTH;
+    }
+}
+
+function applyRoleUI() {
+    if (!AUTH.enabled) return;
+
+    if (!AUTH.authenticated) {
+        showAlert('Нужен вход. Откроется страница логина.', 'warning');
+        const next = encodeURIComponent('/static/settings.html');
+        setTimeout(() => { window.location.href = `/static/login.html?next=${next}`; }, 300);
+        return;
+    }
+
+    const role = (AUTH.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+
+    // admin filter в журнале
+    const journalUserEl = document.getElementById('journal-user-id');
+    if (journalUserEl) {
+        if (isAdmin) journalUserEl.classList.remove('d-none');
+        else journalUserEl.classList.add('d-none');
+    }
+
+    // скрываем админские вкладки
+    const hideTargets = [
+        { tab: '#scheduler-settings', pane: 'scheduler-settings' },
+        { tab: '#tickers-settings', pane: 'tickers-settings' },
+    ];
+
+    hideTargets.forEach(t => {
+        const btn = document.querySelector(`button[data-bs-target="${t.tab}"]`);
+        const pane = document.getElementById(t.pane);
+        if (!isAdmin) {
+            if (btn) btn.classList.add('d-none');
+            if (pane) pane.classList.add('d-none');
+        } else {
+            if (btn) btn.classList.remove('d-none');
+            if (pane) pane.classList.remove('d-none');
+        }
+    });
+}
+
 // === Утилиты ===
 function showAlert(message, type = 'success') {
     const container = document.querySelector('.container');
@@ -737,6 +795,8 @@ function _badgeSuccess(val) {
 async function loadJobJournal() {
     const limitEl = document.getElementById('journal-limit');
     const limit = Math.max(1, Math.min(500, parseInt(limitEl?.value || '50', 10) || 50));
+    const userIdEl = document.getElementById('journal-user-id');
+    const userIdParam = userIdEl && !userIdEl.classList.contains('d-none') ? (userIdEl.value || '').trim() : '';
 
     const dailyBody = document.getElementById('daily-journal-body');
     const frequentBody = document.getElementById('frequent-journal-body');
@@ -753,9 +813,10 @@ async function loadJobJournal() {
     if (nextFrequentTrigger) nextFrequentTrigger.textContent = '—';
 
     try {
+        const qUser = userIdParam ? `&user_id=${encodeURIComponent(userIdParam)}` : '';
         const [dailyResp, freqResp, statusResp] = await Promise.all([
-            fetch(`/scheduler/daily/history?limit=${limit}`),
-            fetch(`/scheduler/frequent/history?limit=${limit}`),
+            fetch(`/scheduler/daily/history?limit=${limit}${qUser}`),
+            fetch(`/scheduler/frequent/history?limit=${limit}${qUser}`),
             fetch(`/scheduler/status`)
         ]);
 
@@ -843,13 +904,99 @@ async function loadJobJournal() {
 }
 
 // === Инициализация ===
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+    await loadAuthMe();
+    applyRoleUI();
+
     loadPortfoliosList();
     loadConfig();
-    loadSchedulerStatus();
+    if (AUTH.enabled && AUTH.user?.role === 'admin') {
+        loadSchedulerStatus();
+    }
     loadJobJournal();
+    loadTelegramStatus();
 });
 
 // Экспорт в global scope для onclick
 window.loadJobJournal = loadJobJournal;
+
+// === Telegram (per-user) ===
+async function loadTelegramStatus() {
+    try {
+        const el = document.getElementById('tg-status');
+        if (!el) return;
+        if (AUTH.enabled && !AUTH.authenticated) {
+            el.className = 'alert alert-warning';
+            el.innerHTML = '<strong>Нужен вход</strong>. Перейдите на страницу логина.';
+            return;
+        }
+        el.className = 'alert alert-light border';
+        el.textContent = 'Загрузка...';
+
+        const resp = await fetch(`${API_BASE}/telegram/status`);
+        const data = await resp.json();
+        if (!data.ok) {
+            el.className = 'alert alert-warning';
+            el.textContent = data.error || 'Не удалось получить статус Telegram';
+            return;
+        }
+        const d = data.data || {};
+        if (!d.linked) {
+            el.className = 'alert alert-warning';
+            el.innerHTML = '<strong>Не привязан</strong>. Сгенерируйте код и отправьте его боту командой /link.';
+            return;
+        }
+        el.className = 'alert alert-success';
+        el.innerHTML = `<strong>Привязан</strong><br><small>chat_id: ${d.chat_id || 'N/A'}</small>`;
+    } catch (e) {
+        console.error('Error loading telegram status:', e);
+        const el = document.getElementById('tg-status');
+        if (el) {
+            el.className = 'alert alert-danger';
+            el.textContent = 'Ошибка загрузки статуса Telegram';
+        }
+    }
+}
+
+async function generateTelegramLinkCode() {
+    const codeEl = document.getElementById('tg-link-code');
+    const hintEl = document.getElementById('tg-link-hint');
+    if (codeEl) codeEl.value = '';
+    if (hintEl) hintEl.textContent = '';
+    try {
+        const resp = await fetch(`${API_BASE}/telegram/link-code`, { method: 'POST' });
+        const data = await resp.json();
+        if (!data.ok) {
+            showAlert(`Ошибка: ${data.error || 'Не удалось создать код'}`, 'danger');
+            return;
+        }
+        const code = data.data.code;
+        const exp = data.data.expires_at;
+        if (codeEl) codeEl.value = code;
+        if (hintEl) hintEl.textContent = `Код действует до: ${exp}. Отправьте боту: /link ${code}`;
+        showAlert('Код привязки создан. Отправьте его боту в Telegram.', 'success');
+    } catch (e) {
+        console.error('Error generating telegram link code:', e);
+        showAlert('Ошибка генерации кода Telegram', 'danger');
+    }
+}
+
+async function sendTelegramTest() {
+    try {
+        const resp = await fetch(`${API_BASE}/telegram/test`, { method: 'POST' });
+        const data = await resp.json();
+        if (data.ok) {
+            showAlert('Тестовое сообщение отправлено в Telegram', 'success');
+        } else {
+            showAlert(`Ошибка: ${data.error || data.message || 'Не удалось отправить'}`, 'danger');
+        }
+        await loadTelegramStatus();
+    } catch (e) {
+        console.error('Error sending telegram test:', e);
+        showAlert('Ошибка отправки теста в Telegram', 'danger');
+    }
+}
+
+window.generateTelegramLinkCode = generateTelegramLinkCode;
+window.sendTelegramTest = sendTelegramTest;
 

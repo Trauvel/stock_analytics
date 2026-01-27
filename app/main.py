@@ -7,8 +7,8 @@ import signal
 from contextlib import asynccontextmanager
 from pathlib import Path
 
-from fastapi import FastAPI, Query
-from fastapi.responses import HTMLResponse, PlainTextResponse
+from fastapi import FastAPI, Query, Depends
+from fastapi.responses import HTMLResponse, PlainTextResponse, RedirectResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 import uvicorn
@@ -24,6 +24,11 @@ from app.scheduler.frequent_updates_job import FrequentUpdatesScheduler
 from app.infrastructure.persistence.repositories.price_history_repository_impl import PriceHistoryRepositoryImpl
 from app.application.dependencies import container
 from app.utils.job_journal import tail_jsonl
+from app.infrastructure.telegram.poller import poll_once as telegram_poll_once
+from app.infrastructure.auth.dependencies import users_auth_enabled, get_current_user
+from app.infrastructure.persistence.job_runs_repo import query_job_run_records
+from app.infrastructure.auth.dependencies import SESSION_COOKIE_NAME
+from app.infrastructure.auth.repositories import get_session_user
 
 # Загружаем переменные окружения из .env файла (UTF-8)
 env_path = Path(__file__).parent.parent / ".env"
@@ -67,6 +72,23 @@ async def lifespan(app: FastAPI):
     # Запускаем основной планировщик (ежедневный полный анализ)
     scheduler = DailyJobScheduler()
     scheduler.start(run_immediately=False)
+
+    # Если включена пользовательская авторизация — всё равно запускаем Telegram poller, чтобы пользователи могли привязать чат
+    try:
+        from apscheduler.triggers.interval import IntervalTrigger
+        scheduler.scheduler.add_job(
+            telegram_poll_once,
+            trigger=IntervalTrigger(seconds=int(os.getenv("TELEGRAM_POLL_INTERVAL_SEC", "10"))),
+            id="telegram_poller_job",
+            name="Telegram Link Poller",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+            misfire_grace_time=60,
+        )
+        logger.info("Telegram poller job scheduled")
+    except Exception as e:
+        logger.warning(f"Could not schedule Telegram poller: {e}")
     
     # Запускаем планировщик частых обновлений (каждые 3-4 часа)
     try:
@@ -205,6 +227,67 @@ class DashboardBasicAuthMiddleware(BaseHTTPMiddleware):
         )
 
 
+class UsersAuthMiddleware(BaseHTTPMiddleware):
+    """
+    Серверная защита при AUTH_USERS_ENABLED=true:
+    - HTML страницы (/, /static/*.html кроме login) -> redirect на /static/login.html
+    - API (/api/* кроме /api/auth/* и /api/health) -> 401 JSON
+    - Scheduler (/scheduler/*) -> 401 JSON (и далее точечная роль-логика на эндпоинтах)
+    """
+
+    def _is_public(self, path: str) -> bool:
+        if path == "/api/health":
+            return True
+        if path.startswith("/api/auth/"):
+            return True
+        if path == "/static/login.html":
+            return True
+        if path.startswith("/static/js/login.js"):
+            return True
+        # Остальные статические ассеты (css/js/img) разрешаем, но HTML кроме login — нет
+        if path.startswith("/static/"):
+            if path.endswith(".html") and path != "/static/login.html":
+                return False
+            return True
+        return False
+
+    def _needs_html_redirect(self, path: str) -> bool:
+        if path == "/":
+            return True
+        if path.startswith("/static/") and path.endswith(".html") and path != "/static/login.html":
+            return True
+        return False
+
+    async def dispatch(self, request: Request, call_next):
+        if not users_auth_enabled():
+            return await call_next(request)
+
+        path = request.url.path or "/"
+        if self._is_public(path):
+            return await call_next(request)
+
+        # читаем user из cookie (без Depends)
+        sid = request.cookies.get(SESSION_COOKIE_NAME)
+        user = get_session_user(sid) if sid else None
+
+        if not user:
+            # HTML -> редирект на login
+            if self._needs_html_redirect(path):
+                next_url = str(request.url.path)
+                if request.url.query:
+                    next_url += "?" + request.url.query
+                return RedirectResponse(url=f"/static/login.html?next={next_url}", status_code=302)
+
+            # API/Scheduler -> JSON 401
+            if path.startswith("/api/") or path.startswith("/scheduler/"):
+                return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+            return JSONResponse({"ok": False, "error": "Not authenticated"}, status_code=401)
+
+        request.state.user = user
+        return await call_next(request)
+
+
 _dashboard_user = os.getenv("DASHBOARD_USER", "dashboard").strip() or "dashboard"
 _dashboard_password = os.getenv("DASHBOARD_PASSWORD", "").strip()
 if _dashboard_auth_enabled():
@@ -216,6 +299,9 @@ if _dashboard_auth_enabled():
     logger.info("Dashboard Basic Auth enabled (DASHBOARD_PASSWORD from .env)")
 else:
     logger.info("Dashboard auth disabled (DASHBOARD_PASSWORD not set)")
+
+# Включаем server-side users auth guard (если AUTH_USERS_ENABLED=true)
+app.add_middleware(UsersAuthMiddleware)
 
 # Подключаем статические файлы для GUI
 try:
@@ -281,7 +367,8 @@ async def scheduler_status():
 @app.post("/scheduler/run-now")
 async def run_job_now(
     instrument_type: str = Query(default="all", description="Тип инструментов: all, stocks, bonds"),
-    selected_bonds: Optional[str] = Query(default=None, description="Список выбранных облигаций через запятую")
+    selected_bonds: Optional[str] = Query(default=None, description="Список выбранных облигаций через запятую"),
+    user=Depends(get_current_user),
 ):
     """
     Запустить задачу генерации отчёта немедленно.
@@ -298,6 +385,13 @@ async def run_job_now(
             "ok": False,
             "error": "Scheduler not initialized"
         }
+
+    # Если включены пользователи — только admin может запускать вручную
+    if users_auth_enabled():
+        if not user:
+            return {"ok": False, "error": "Not authenticated"}
+        if getattr(user, "role", None) != "admin":
+            return {"ok": False, "error": "Admin role required"}
     
     # Если указаны конкретные облигации, передаём их
     bonds_list = None
@@ -308,7 +402,12 @@ async def run_job_now(
     logger.info(f"Manual job trigger requested via API (instrument_type: {instrument_type}, selected_bonds: {bonds_list})")
     
     try:
-        success = scheduler.run_once(instrument_type=instrument_type, selected_bonds=bonds_list)
+        success = scheduler.run_once(
+            instrument_type=instrument_type,
+            selected_bonds=bonds_list,
+            user_id=getattr(user, "id", None) if user else None,
+            role=getattr(user, "role", None) if user else None,
+        )
         
         type_label = {
             "all": "все тикеры",
@@ -329,24 +428,72 @@ async def run_job_now(
 
 
 @app.get("/scheduler/frequent/history")
-async def frequent_updates_history(limit: int = Query(default=50, ge=1, le=500)):
+async def frequent_updates_history(
+    limit: int = Query(default=50, ge=1, le=500),
+    user_id: Optional[str] = Query(default=None, description="Фильтр по user_id (admin)"),
+    user=Depends(get_current_user),
+):
     """Последние записи журнала запусков частой джобы."""
-    items = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
+    include_all = bool(user and getattr(user, "role", None) == "admin")
+    effective_user_id = user_id if include_all else (getattr(user, "id", None) if users_auth_enabled() else None)
+    items = query_job_run_records(
+        job="frequent_updates",
+        limit=limit,
+        user_id=effective_user_id,
+        include_all_users=include_all and (effective_user_id is None),
+    )
+    if not items:
+        # fallback
+        items = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
     return {"ok": True, "data": {"items": items, "count": len(items)}}
 
 
 @app.get("/scheduler/daily/history")
-async def daily_job_history(limit: int = Query(default=50, ge=1, le=500)):
+async def daily_job_history(
+    limit: int = Query(default=50, ge=1, le=500),
+    user_id: Optional[str] = Query(default=None, description="Фильтр по user_id (admin)"),
+    user=Depends(get_current_user),
+):
     """Последние записи журнала запусков ежедневной джобы."""
-    items = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
+    include_all = bool(user and getattr(user, "role", None) == "admin")
+    effective_user_id = user_id if include_all else (getattr(user, "id", None) if users_auth_enabled() else None)
+    items = query_job_run_records(
+        job="daily_job",
+        limit=limit,
+        user_id=effective_user_id,
+        include_all_users=include_all and (effective_user_id is None),
+    )
+    if not items:
+        items = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
     return {"ok": True, "data": {"items": items, "count": len(items)}}
 
 
 @app.get("/scheduler/history")
-async def scheduler_history(limit: int = Query(default=50, ge=1, le=500)):
+async def scheduler_history(
+    limit: int = Query(default=50, ge=1, le=500),
+    user_id: Optional[str] = Query(default=None, description="Фильтр по user_id (admin)"),
+    user=Depends(get_current_user),
+):
     """Общий журнал запусков (daily + frequent)."""
-    daily = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
-    frequent = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
+    include_all = bool(user and getattr(user, "role", None) == "admin")
+    effective_user_id = user_id if include_all else (getattr(user, "id", None) if users_auth_enabled() else None)
+
+    daily = query_job_run_records(
+        job="daily_job",
+        limit=limit,
+        user_id=effective_user_id,
+        include_all_users=include_all and (effective_user_id is None),
+    )
+    frequent = query_job_run_records(
+        job="frequent_updates",
+        limit=limit,
+        user_id=effective_user_id,
+        include_all_users=include_all and (effective_user_id is None),
+    )
+    if not daily:
+        daily = tail_jsonl("data/job_runs/daily_job.jsonl", limit=limit)
+    if not frequent:
+        frequent = tail_jsonl("data/job_runs/frequent_updates.jsonl", limit=limit)
     return {
         "ok": True,
         "data": {

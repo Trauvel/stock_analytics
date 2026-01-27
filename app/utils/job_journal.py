@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Optional
 
 from loguru import logger
 
+from app.infrastructure.persistence.job_runs_repo import append_job_run_record
+
 
 def _project_root() -> Path:
     return Path(__file__).parent.parent.parent
@@ -35,6 +37,22 @@ def append_jsonl(relative_path: str, record: Dict[str, Any]) -> None:
             f.write(json.dumps(record, ensure_ascii=False) + "\n")
     except Exception as e:
         logger.warning(f"Failed to append journal {path}: {e}")
+
+    # Дополнительно пишем в SQLite (если доступно)
+    try:
+        append_job_run_record(record)
+    except Exception:
+        pass
+
+
+def append_job_record(job: str, event: str, run_id: str, extra: Optional[Dict[str, Any]] = None) -> None:
+    """
+    Упрощённая обёртка: формирует record и пишет и в JSONL, и в SQLite.
+    """
+    record: Dict[str, Any] = {"job": job, "event": event, "run_id": run_id}
+    if extra:
+        record.update(extra)
+    append_jsonl(f"data/job_runs/{job}.jsonl", record)
 
 
 def tail_jsonl(relative_path: str, limit: int = 50) -> List[Dict[str, Any]]:

@@ -7,6 +7,42 @@ let _lastRecos = null;
 let _lastExportPayload = null;
 let _lastExportFilename = null;
 
+// === Auth / роли ===
+let AUTH = { enabled: false, authenticated: false, user: null };
+
+async function loadAuthMe() {
+    try {
+        const resp = await fetch(`${API_BASE}/auth/me`);
+        const data = await resp.json();
+        if (!data?.ok) return AUTH;
+        const d = data.data || {};
+        AUTH.enabled = !!d.enabled;
+        AUTH.authenticated = !!d.authenticated;
+        AUTH.user = d.user || null;
+        return AUTH;
+    } catch (e) {
+        console.warn('auth/me failed:', e);
+        return AUTH;
+    }
+}
+
+function applyRoleUI() {
+    if (!AUTH.enabled) return;
+    const loginLink = document.getElementById('login-link');
+    const runBtn = document.querySelector('button[onclick="showRunJobModal()"]');
+
+    if (!AUTH.authenticated) {
+        if (loginLink) loginLink.classList.remove('d-none');
+        if (runBtn) runBtn.classList.add('d-none');
+        return;
+    }
+
+    const role = (AUTH.user?.role || '').toLowerCase();
+    const isAdmin = role === 'admin';
+    if (!isAdmin && runBtn) runBtn.classList.add('d-none');
+    if (loginLink) loginLink.classList.add('d-none');
+}
+
 // === Подсказки по сигналам (для "Детально") ===
 const SIGNAL_META = {
     PRICE_ABOVE_SMA200: {
@@ -628,7 +664,10 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 // Автозагрузка при открытии страницы
-window.addEventListener('load', () => {
+window.addEventListener('load', async () => {
+    await loadAuthMe();
+    applyRoleUI();
+
     loadReport();
     
     // Автообновление каждые 5 минут

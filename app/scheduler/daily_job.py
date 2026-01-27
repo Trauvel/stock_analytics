@@ -34,7 +34,14 @@ class DailyJobScheduler:
             logger.warning("Using legacy ReportGenerator (deprecated, consider switching to DDD)")
             self.report_generator = ReportGenerator()
     
-    def run_daily_job(self, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None):
+    def run_daily_job(
+        self,
+        instrument_type: str = "all",
+        selected_bonds: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+        role: Optional[str] = None,
+        source: str = "scheduled",
+    ):
         """
         Выполнить ежедневную задачу генерации отчёта.
         
@@ -60,6 +67,9 @@ class DailyJobScheduler:
                 "run_id": run_id,
                 "instrument_type": instrument_type,
                 "selected_bonds": selected_bonds,
+                "source": source,
+                "user_id": user_id,
+                "role": role,
             },
         )
 
@@ -111,6 +121,9 @@ class DailyJobScheduler:
                     "successful": successful,
                     "failed": failed,
                     "total_signals": total_signals,
+                    "source": source,
+                    "user_id": user_id,
+                    "role": role,
                 },
             )
             
@@ -135,6 +148,9 @@ class DailyJobScheduler:
                     "success": False,
                     "duration_seconds": elapsed,
                     "error": str(e),
+                    "source": source,
+                    "user_id": user_id,
+                    "role": role,
                 },
             )
             
@@ -191,7 +207,13 @@ class DailyJobScheduler:
             self.scheduler.shutdown()
             logger.info("Scheduler stopped")
     
-    def run_once(self, instrument_type: str = "all", selected_bonds: Optional[List[str]] = None):
+    def run_once(
+        self,
+        instrument_type: str = "all",
+        selected_bonds: Optional[List[str]] = None,
+        user_id: Optional[str] = None,
+        role: Optional[str] = None,
+    ):
         """
         Выполнить задачу один раз без планировщика.
         
@@ -200,7 +222,13 @@ class DailyJobScheduler:
             selected_bonds: Список выбранных облигаций (только для instrument_type=bonds)
         """
         logger.info(f"Running job once (manual trigger, instrument_type: {instrument_type}, selected_bonds: {selected_bonds})")
-        return self.run_daily_job(instrument_type=instrument_type, selected_bonds=selected_bonds)
+        return self.run_daily_job(
+            instrument_type=instrument_type,
+            selected_bonds=selected_bonds,
+            user_id=user_id,
+            role=role,
+            source="manual",
+        )
     
     def get_job_info(self):
         """

@@ -53,6 +53,11 @@
                     🧾 Журнал
                 </button>
             </li>
+            <li class="nav-item">
+                <button class="nav-link" data-bs-toggle="tab" data-bs-target="#account-settings">
+                    👤 Аккаунт
+                </button>
+            </li>
         </ul>
 
         <!-- Содержимое вкладок -->
@@ -249,6 +254,7 @@
                     <div class="card-header d-flex align-items-center justify-content-between">
                         <h5 class="mb-0">Журнал запусков</h5>
                         <div class="d-flex gap-2">
+                        <input type="text" class="form-control form-control-sm d-none" id="journal-user-id" placeholder="user_id (admin)" style="width: 220px;">
                             <input type="number" class="form-control form-control-sm" id="journal-limit" value="50" min="1" max="500" style="width: 110px;">
                             <button class="btn btn-sm btn-outline-primary" onclick="loadJobJournal()">🔄 Обновить</button>
                         </div>
@@ -315,6 +321,40 @@
                                 </tbody>
                             </table>
                         </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Аккаунт -->
+            <div class="tab-pane fade" id="account-settings">
+                <div class="card">
+                    <div class="card-header">
+                        <h5 class="mb-0">Аккаунт и Telegram</h5>
+                    </div>
+                    <div class="card-body">
+                        <div class="alert alert-secondary">
+                            Привяжите свой Telegram чат к боту, чтобы получать уведомления от системы.
+                        </div>
+
+                        <div class="mb-3">
+                            <h6>Статус Telegram</h6>
+                            <div id="tg-status" class="alert alert-light border">Загрузка...</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <button class="btn btn-outline-primary" onclick="generateTelegramLinkCode()">🔑 Сгенерировать код привязки</button>
+                            <button class="btn btn-outline-success" onclick="sendTelegramTest()">✅ Отправить тест</button>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label">Код привязки</label>
+                            <input type="text" class="form-control" id="tg-link-code" readonly placeholder="Нажмите «Сгенерировать код привязки»">
+                            <small class="text-muted">
+                                Откройте чат с ботом и отправьте: <code>/link &lt;код&gt;</code>
+                            </small>
+                        </div>
+
+                        <div id="tg-link-hint" class="text-muted small"></div>
                     </div>
                 </div>
             </div>
