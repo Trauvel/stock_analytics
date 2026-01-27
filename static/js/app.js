@@ -3,6 +3,80 @@
 const API_BASE = '/api';
 let currentReport = null;
 
+// === Подсказки по сигналам (для "Детально") ===
+const SIGNAL_META = {
+    PRICE_ABOVE_SMA200: {
+        color: 'success',
+        name: '↗ Выше SMA200',
+        description: 'Цена выше 200-дневной SMA. Обычно это признак долгосрочного восходящего тренда (бычий фон).'
+    },
+    PRICE_BELOW_SMA200: {
+        color: 'danger',
+        name: '↘ Ниже SMA200',
+        description: 'Цена ниже 200-дневной SMA. Обычно это признак долгосрочного нисходящего тренда (медвежий фон).'
+    },
+    SMA50_CROSS_UP_SMA200: {
+        color: 'success',
+        name: '⭐ Золотой крест',
+        description: 'SMA50 пересекла SMA200 снизу вверх. Часто трактуется как усиление/смена тренда вверх (бычий сигнал).'
+    },
+    SMA50_CROSS_DOWN_SMA200: {
+        color: 'danger',
+        name: '💀 Крест смерти',
+        description: 'SMA50 пересекла SMA200 сверху вниз. Часто трактуется как ослабление/смена тренда вниз (медвежий сигнал).'
+    },
+    DY_GT_TARGET: {
+        color: 'primary',
+        name: '💵 Высокая DY',
+        description: 'Дивидендная (или купонная) доходность выше целевого порога из настроек. Может быть аргументом в пользу покупки/удержания.'
+    },
+    VOL_SPIKE: {
+        color: 'warning',
+        name: '📈 Всплеск объёма',
+        description: 'Объём торгов заметно выше обычного. Может подтверждать силу движения цены или повышенный интерес к инструменту.'
+    },
+    NEAR_52W_LOW: {
+        color: 'info',
+        name: '📉 Близко к 52W Low',
+        description: 'Цена находится в нижней части диапазона за 52 недели. Иногда трактуется как “дешевле обычного”, но это не гарантия разворота.'
+    },
+    NEAR_52W_HIGH: {
+        color: 'info',
+        name: '📈 Близко к 52W High',
+        description: 'Цена находится у верхней части диапазона за 52 недели. Иногда трактуется как перегретость/риск отката, но может быть и сильный тренд.'
+    },
+    RSI_OVERSOLD: {
+        color: 'secondary',
+        name: '🧊 RSI перепродан',
+        description: 'RSI ниже ~30. Часто трактуется как перепроданность (возможен отскок), но на сильном тренде может держаться долго.'
+    },
+    RSI_OVERBOUGHT: {
+        color: 'secondary',
+        name: '🔥 RSI перекуплен',
+        description: 'RSI выше ~70. Часто трактуется как перекупленность (возможна коррекция), но на сильном тренде может держаться долго.'
+    }
+};
+
+function escapeHtmlAttr(text) {
+    if (text === null || text === undefined) return '';
+    return String(text)
+        .replace(/&/g, '&amp;')
+        .replace(/"/g, '&quot;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+}
+
+function initTooltips(root = document) {
+    // Bootstrap Tooltip: переинициализируем, чтобы подсказки работали после перерендера
+    if (typeof bootstrap === 'undefined' || !bootstrap.Tooltip) return;
+    const els = root.querySelectorAll('[data-bs-toggle="tooltip"]');
+    els.forEach(el => {
+        const existing = bootstrap.Tooltip.getInstance(el);
+        if (existing) existing.dispose();
+        new bootstrap.Tooltip(el);
+    });
+}
+
 // Утилиты
 function formatNumber(num, decimals = 2) {
     if (num === null || num === undefined) return 'N/A';
@@ -29,29 +103,11 @@ function getTrendIndicator(price, sma200) {
 
 function getSignalBadges(signals) {
     if (!signals || signals.length === 0) return '<span class="text-muted">—</span>';
-    
-    const signalColors = {
-        'PRICE_ABOVE_SMA200': 'success',
-        'PRICE_BELOW_SMA200': 'danger',
-        'SMA50_CROSS_UP_SMA200': 'success',
-        'SMA50_CROSS_DOWN_SMA200': 'danger',
-        'DY_GT_TARGET': 'primary',
-        'VOL_SPIKE': 'warning'
-    };
-    
-    const signalNames = {
-        'PRICE_ABOVE_SMA200': '↗ Выше SMA200',
-        'PRICE_BELOW_SMA200': '↘ Ниже SMA200',
-        'SMA50_CROSS_UP_SMA200': '⭐ Золотой крест',
-        'SMA50_CROSS_DOWN_SMA200': '💀 Крест смерти',
-        'DY_GT_TARGET': '💵 Высокая DY',
-        'VOL_SPIKE': '📈 Всплеск объёма'
-    };
-    
+
     return signals.map(signal => {
-        const color = signalColors[signal] || 'secondary';
-        const name = signalNames[signal] || signal;
-        return `<span class="badge bg-${color} signal-badge">${name}</span>`;
+        const meta = SIGNAL_META[signal] || { color: 'secondary', name: signal, description: signal };
+        const title = escapeHtmlAttr(meta.description || meta.name || signal);
+        return `<span class="badge bg-${meta.color} signal-badge" role="button" tabindex="0" data-bs-toggle="tooltip" data-bs-placement="top" title="${title}">${meta.name}</span>`;
     }).join(' ');
 }
 
@@ -90,6 +146,9 @@ async function loadReport() {
         updateHighDividendTable(summaryData.data);
         updateAllTickersTable(currentReport);
         updateSignalsView(currentReport);
+
+        // Подсказки по сигналам
+        initTooltips(document);
         
         // Обновляем время
         document.getElementById('last-update').textContent = formatDateTime(currentReport.generated_at);
@@ -193,27 +252,11 @@ function updateSignalsView(report) {
         return;
     }
     
-    const signalNames = {
-        'PRICE_ABOVE_SMA200': '↗ Выше SMA200',
-        'PRICE_BELOW_SMA200': '↘ Ниже SMA200',
-        'SMA50_CROSS_UP_SMA200': '⭐ Золотой крест',
-        'SMA50_CROSS_DOWN_SMA200': '💀 Крест смерти',
-        'DY_GT_TARGET': '💵 Высокая дивидендная доходность',
-        'VOL_SPIKE': '📈 Всплеск объёма'
-    };
-    
-    const signalTypes = {
-        'PRICE_ABOVE_SMA200': 'success',
-        'PRICE_BELOW_SMA200': 'danger',
-        'SMA50_CROSS_UP_SMA200': 'success',
-        'SMA50_CROSS_DOWN_SMA200': 'danger',
-        'DY_GT_TARGET': 'primary',
-        'VOL_SPIKE': 'warning'
-    };
-    
     container.innerHTML = Object.entries(signalGroups).map(([signal, items]) => {
-        const type = signalTypes[signal] || 'secondary';
-        const name = signalNames[signal] || signal;
+        const meta = SIGNAL_META[signal] || { color: 'secondary', name: signal, description: signal };
+        const type = meta.color || 'secondary';
+        const name = meta.name || signal;
+        const title = escapeHtmlAttr(meta.description || name || signal);
         
         const tickersList = items.map(item => {
             const dyBadge = item.data.dy_pct ? 
@@ -229,7 +272,7 @@ function updateSignalsView(report) {
         return `
             <div class="col-md-6 mb-3">
                 <div class="card signal-card signal-${type}">
-                    <div class="card-header bg-${type} text-white">
+                    <div class="card-header bg-${type} text-white" data-bs-toggle="tooltip" data-bs-placement="top" title="${title}">
                         <h6 class="mb-0">${name}</h6>
                     </div>
                     <div class="card-body">
@@ -242,6 +285,8 @@ function updateSignalsView(report) {
             </div>
         `;
     }).join('');
+
+    initTooltips(container);
 }
 
 function showLoading() {
