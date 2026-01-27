@@ -239,7 +239,11 @@ async def update_config_api(config_update: dict):
         
         return {
             "ok": True,
-            "message": "Configuration updated successfully. Restart server to apply all changes."
+            "message": (
+                "Configuration updated successfully. "
+                "Изменения списка тикеров и параметров применяются сразу; "
+                "изменения расписания могут потребовать перезапуска сервера."
+            )
         }
         
     except Exception as e:
@@ -275,8 +279,12 @@ async def add_ticker(ticker_data: dict):
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         
         logger.info(f"Added ticker: {ticker_data['symbol']}")
+
+        # Применяем без перезапуска
+        from app.config.loader import reload_config
+        reload_config()
         
-        return {"ok": True, "message": f"Ticker {ticker_data['symbol']} added"}
+        return {"ok": True, "message": f"Ticker {ticker_data['symbol']} added and applied (no restart needed)"}
         
     except Exception as e:
         logger.error(f"Error adding ticker: {e}")
@@ -310,8 +318,12 @@ async def remove_ticker(symbol: str):
             yaml.dump(config, f, allow_unicode=True, default_flow_style=False)
         
         logger.info(f"Removed ticker: {symbol}")
+
+        # Применяем без перезапуска
+        from app.config.loader import reload_config
+        reload_config()
         
-        return {"ok": True, "message": f"Ticker {symbol} removed"}
+        return {"ok": True, "message": f"Ticker {symbol} removed and applied (no restart needed)"}
         
     except Exception as e:
         logger.error(f"Error removing ticker: {e}")

@@ -13,7 +13,8 @@ class GetUniverseUseCase:
     
     def __init__(self):
         """Инициализация use case."""
-        self.config = get_config()
+        # Не кэшируем config в инстансе: обновления config.yaml должны применяться без рестарта
+        self._config = None
     
     def execute(self, include_portfolio: bool = True) -> List[str]:
         """
@@ -25,10 +26,11 @@ class GetUniverseUseCase:
         Returns:
             List[str]: Список всех тикеров (universe + portfolio)
         """
-        # Получаем тикеры из конфигурации (universe)
+        # Получаем тикеры из актуальной конфигурации (universe)
+        config = get_config()
         universe_tickers = [
             ticker_config.symbol 
-            for ticker_config in self.config.universe
+            for ticker_config in config.universe
         ]
         
         logger.debug(f"Universe tickers: {len(universe_tickers)}")
