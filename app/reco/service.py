@@ -129,7 +129,18 @@ def get_recommendations(
             return (1, -r['score'])  # HOLD в середине
     
     recommendations.sort(key=sort_key)
-    
+
+    # BUY — редкость: оставляем не более max_buy_count лучших по score, остальные → HOLD
+    max_buy = getattr(config, 'max_buy_count', 4)
+    buy_indices = [i for i, r in enumerate(recommendations) if r['action'] == 'BUY']
+    if len(buy_indices) > max_buy:
+        for i in buy_indices[max_buy:]:
+            recommendations[i]['action'] = 'HOLD'
+            if 'reasons' in recommendations[i]:
+                recommendations[i]['reasons'] = list(recommendations[i]['reasons'])
+                recommendations[i]['reasons'].append('○ BUY ограничен топ-N идеями')
+        recommendations.sort(key=sort_key)
+
     logger.info(f"Generated {len(recommendations)} recommendations")
     return recommendations
 

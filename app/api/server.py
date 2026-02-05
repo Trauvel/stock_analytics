@@ -676,12 +676,15 @@ async def get_reco_config_api():
             "data": {
                 "dy_buy_min": cfg.dy_buy_min,
                 "dy_very_high": cfg.dy_very_high,
+                "dy_score_cap": getattr(cfg, 'dy_score_cap', 12.0),
                 "max_discount_vs_sma200": cfg.max_discount_vs_sma200,
                 "min_premium_vs_sma200": cfg.min_premium_vs_sma200,
+                "buy_score_if_below_sma200": getattr(cfg, 'buy_score_if_below_sma200', 3.2),
                 "trend_up_min": cfg.trend_up_min,
                 "trend_down_max": cfg.trend_down_max,
                 "buy_score_cutoff": cfg.buy_score_cutoff,
                 "sell_score_cutoff": cfg.sell_score_cutoff,
+                "max_buy_count": getattr(cfg, 'max_buy_count', 4),
                 "near_52w_low_threshold": cfg.near_52w_low_threshold,
                 "near_52w_high_threshold": cfg.near_52w_high_threshold
             }

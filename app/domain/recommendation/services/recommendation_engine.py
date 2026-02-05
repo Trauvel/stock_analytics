@@ -9,19 +9,27 @@ from app.domain.recommendation.value_objects.action import Action, ActionType
 from app.domain.recommendation.value_objects.confidence import Confidence
 
 
+def _is_bond_symbol(symbol: str) -> bool:
+    """Облигация по формату ISIN (12 символов, первые 2 — буквы)."""
+    return len(symbol) == 12 and symbol[:2].isalpha() and symbol[2:].isalnum()
+
+
 class RecommendationConfig:
-    """Конфигурация для генерации рекомендаций."""
+    """Конфигурация для генерации рекомендаций (в т.ч. dy_score_cap, BUY = редкость)."""
     
     def __init__(
         self,
         dy_buy_min: float = 8.0,
         dy_very_high: float = 15.0,
+        dy_score_cap: float = 12.0,
         max_discount_vs_sma200: float = -10.0,
         min_premium_vs_sma200: float = 10.0,
+        buy_score_if_below_sma200: float = 3.2,
         trend_up_min: float = 0.5,
         trend_down_max: float = -0.5,
-        buy_score_cutoff: float = 2.0,
+        buy_score_cutoff: float = 2.8,
         sell_score_cutoff: float = -2.0,
+        max_buy_count: int = 4,
         near_52w_low_threshold: float = 0.3,
         near_52w_high_threshold: float = 0.9,
         event_predictor_enabled: bool = True,
@@ -29,12 +37,15 @@ class RecommendationConfig:
     ):
         self.dy_buy_min = dy_buy_min
         self.dy_very_high = dy_very_high
+        self.dy_score_cap = dy_score_cap
         self.max_discount_vs_sma200 = max_discount_vs_sma200
         self.min_premium_vs_sma200 = min_premium_vs_sma200
+        self.buy_score_if_below_sma200 = buy_score_if_below_sma200
         self.trend_up_min = trend_up_min
         self.trend_down_max = trend_down_max
         self.buy_score_cutoff = buy_score_cutoff
         self.sell_score_cutoff = sell_score_cutoff
+        self.max_buy_count = max_buy_count
         self.near_52w_low_threshold = near_52w_low_threshold
         self.near_52w_high_threshold = near_52w_high_threshold
         self.event_predictor_enabled = event_predictor_enabled
@@ -97,24 +108,27 @@ class RecommendationEngine:
                         reasons.append(f"⚠️ {event_signal.get('reason', 'Негативный новостной фон')}")
                         confidence_factors.append(1.0)
         
-        # === 1. Анализ дивидендов ===
+        is_bond = _is_bond_symbol(stock.symbol)
+
+        # === 1. Анализ дивидендов (нормализация: DY > dy_score_cap не усиливает BUY) ===
         if stock.dividend_yield:
             dy_value = stock.dividend_yield.value
-            if dy_value >= self.config.dy_buy_min:
+            dy_for_score = min(dy_value, getattr(self.config, 'dy_score_cap', 12.0))
+            if dy_for_score >= self.config.dy_buy_min:
                 score += 1.5
-                reasons.append(f"✓ Дивиденды {dy_value:.1f}% ≥ {self.config.dy_buy_min}%")
+                reasons.append(f"✓ Дивиденды/купон {dy_value:.1f}% ≥ {self.config.dy_buy_min}%")
                 confidence_factors.append(1)
-                
                 if dy_value >= self.config.dy_very_high:
-                    score += 0.5
-                    reasons.append(f"✓ Очень высокая DY {dy_value:.1f}%")
-                    confidence_factors.append(1)
+                    reasons.append(f"⚠ Высокая DY {dy_value:.1f}% — проверить устойчивость")
+                    confidence_factors.append(0.5)
+                elif dy_value > getattr(self.config, 'dy_score_cap', 12.0):
+                    reasons.append(f"⚠ DY выше порога — проверить устойчивость")
             elif dy_value < self.config.dy_buy_min * 0.5:
                 score -= 0.5
                 reasons.append(f"✗ Низкие дивиденды {dy_value:.1f}%")
-        
-        # === 2. Позиция относительно SMA200 ===
-        if stock.price and stock.sma_200:
+
+        # === 2. Позиция относительно SMA200 (для акций) ===
+        if not is_bond and stock.price and stock.sma_200:
             discount = stock.discount_to_sma200()
             if discount is not None:
                 if discount <= self.config.max_discount_vs_sma200:
@@ -128,8 +142,8 @@ class RecommendationEngine:
                 else:
                     reasons.append(f"○ Цена около SMA200 ({discount:.1f}%)")
         
-        # === 3. Краткосрочный тренд (20 дней) ===
-        if stock.price and stock.sma_20:
+        # === 3. Краткосрочный тренд (20 дней, только акции) ===
+        if not is_bond and stock.price and stock.sma_20:
             trend_pct = stock.price.percentage_diff(stock.sma_20)
             if trend_pct >= self.config.trend_up_min:
                 score += 0.8
@@ -140,8 +154,10 @@ class RecommendationEngine:
                 reasons.append(f"✗ Нисходящий тренд {trend_pct:.1f}%")
                 confidence_factors.append(1)
         
-        # === 4. Позиция в 52W диапазоне ===
-        position = stock.position_in_52w_range()
+        # === 4. Позиция в 52W диапазоне (только акции) ===
+        if is_bond:
+            reasons.append("○ Облигация: учтена доходность к купону")
+        position = stock.position_in_52w_range() if not is_bond else None
         if position is not None:
             if position < self.config.near_52w_low_threshold:
                 score += 0.5
@@ -152,8 +168,11 @@ class RecommendationEngine:
                 reasons.append(f"✗ Цена у верхней границы 52W ({position*100:.0f}%)")
                 confidence_factors.append(0.5)
         
-        # === 5. Анализ технических сигналов ===
-        if stock.signals:
+        # === 5. Анализ технических сигналов (акции; облигации — только DY_GT_TARGET) ===
+        if is_bond and stock.signals and any(s.signal_type == "DY_GT_TARGET" for s in stock.signals):
+            score += 0.3
+            confidence_factors.append(0.3)
+        elif not is_bond and stock.signals:
             bullish_count = stock.bullish_signals_count()
             bearish_count = stock.bearish_signals_count()
             
@@ -165,8 +184,18 @@ class RecommendationEngine:
                 confidence_factors.append(0.3)
         
         # === Определение действия ===
-        if score >= self.config.buy_score_cutoff:
+        price_below_sma200 = (
+            stock.price and stock.sma_200 and stock.price.to_float() < stock.sma_200.to_float()
+        )
+        buy_cutoff = getattr(self.config, 'buy_score_cutoff', 2.8)
+        if score >= buy_cutoff:
             action = Action(action_type=ActionType.BUY)
+            # Для BUY: цена не ниже SMA200 или сильный фундамент
+            if not is_bond and price_below_sma200:
+                need = getattr(self.config, 'buy_score_if_below_sma200', 3.2)
+                if score < need:
+                    action = Action(action_type=ActionType.HOLD)
+                    reasons.append("○ BUY снижен до HOLD: цена ниже SMA200 без сильного фундамента")
         elif score <= self.config.sell_score_cutoff:
             action = Action(action_type=ActionType.SELL)
         else:
@@ -204,9 +233,9 @@ class RecommendationEngine:
         if action.is_buy():
             if score >= 4.0:
                 return "Увеличить позицию до 2× от базовой"
-            elif (stock.sma_200 and stock.price and 
-                  stock.price < stock.sma_200 * 0.9 and 
-                  stock.dividend_yield and stock.dividend_yield.value >= 12):
+            elif (stock.sma_200 and stock.price and
+                  stock.price < stock.sma_200 * 0.9 and
+                  stock.dividend_yield and stock.dividend_yield.value >= getattr(self.config, 'dy_score_cap', 12.0)):
                 return "Увеличить позицию до 1.5× от базовой"
             else:
                 return "Базовая доля (1×)"
