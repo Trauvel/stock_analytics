@@ -201,17 +201,17 @@ class RecommendationEngine:
                 score -= 0.3 * (bearish_count - bullish_count)
                 confidence_factors.append(0.3)
         
-        # === Определение действия: BUY / ACCUMULATE / HOLD / AVOID / SELL ===
+        # === Определение действия: BUY / ACCUMULATE / HOLD / REDUCE / SELL ===
         price_below_sma200 = (
             stock.price and stock.sma_200 and stock.price.to_float() < stock.sma_200.to_float()
         )
         buy_cutoff = getattr(self.config, 'buy_score_cutoff', 2.0)
         accum_min = getattr(self.config, 'accumulate_score_min', 0.5)
-        avoid_max = getattr(self.config, 'avoid_score_max', -1.0)
+        reduce_max = getattr(self.config, 'avoid_score_max', -1.0)
         if score <= self.config.sell_score_cutoff:
             action = Action(action_type=ActionType.SELL)
-        elif score <= avoid_max:
-            action = Action(action_type=ActionType.AVOID)
+        elif score <= reduce_max:
+            action = Action(action_type=ActionType.REDUCE)
         elif score >= buy_cutoff:
             action = Action(action_type=ActionType.BUY)
             if asset_type == "equity" and price_below_sma200:
@@ -223,6 +223,12 @@ class RecommendationEngine:
             action = Action(action_type=ActionType.ACCUMULATE)
         else:
             action = Action(action_type=ActionType.HOLD)
+
+        # Защитный актив (commodity) выше SMA200: разрешаем ACCUMULATE при слабом score
+        if action.action_type == ActionType.HOLD and asset_type == "commodity" and stock.price and stock.sma_200:
+            if stock.price.to_float() >= stock.sma_200.to_float() and score >= -0.5:
+                action = Action(action_type=ActionType.ACCUMULATE)
+                reasons.append("○ Защитный актив выше SMA200 — можно докупать понемногу")
         
         # === Определение уверенности ===
         confidence_score = sum(confidence_factors)
@@ -263,7 +269,7 @@ class RecommendationEngine:
             return "Базовая доля (1×)"
         if action.is_accumulate():
             return "Докупать понемногу"
-        if action.is_avoid():
+        if action.is_reduce():
             return "Не докупать; при желании сократить"
         if action.is_sell():
             if score <= -4.0:

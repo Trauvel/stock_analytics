@@ -205,17 +205,17 @@ def make_reco(
             score += 0.3
             confidence_factors.append(0.3)
 
-    # === Определение действия: BUY / ACCUMULATE / HOLD / AVOID / SELL (4 уровня по отзыву) ===
+    # === Определение действия: BUY / ACCUMULATE / HOLD / REDUCE / SELL ===
     accumulate_min = getattr(config, 'accumulate_score_min', 0.5)
-    avoid_max = getattr(config, 'avoid_score_max', -1.0)
+    reduce_max = getattr(config, 'avoid_score_max', -1.0)  # ниже → REDUCE (не докупать/сократить)
     price_below_sma200 = (
         snapshot.sma200 and snapshot.price and snapshot.price < snapshot.sma200
     )
 
     if score <= config.sell_score_cutoff:
         action = "SELL"
-    elif score <= avoid_max:
-        action = "AVOID"
+    elif score <= reduce_max:
+        action = "REDUCE"
     elif score >= config.buy_score_cutoff:
         action = "BUY"
         # Для BUY: цена не ниже SMA200 или сильный фундамент (облигации/commodity не трогаем)
@@ -226,6 +226,12 @@ def make_reco(
         action = "ACCUMULATE"
     else:
         action = "HOLD"
+
+    # Commodity выше SMA200 при боковике: разрешаем ACCUMULATE (не оставлять HOLD при слабом score)
+    if action == "HOLD" and asset_type == "commodity" and snapshot.sma200 and snapshot.price:
+        if snapshot.price >= snapshot.sma200 and score >= -0.5:
+            action = "ACCUMULATE"
+            reasons.append("○ Защитный актив выше SMA200 — можно докупать понемногу")
     
     # === Определение уверенности ===
     confidence_score = sum(confidence_factors)
@@ -265,7 +271,7 @@ def _sizing_hint(
         return "Базовая доля (1×)"
     if action == "ACCUMULATE":
         return "Докупать понемногу"
-    if action == "AVOID":
+    if action == "REDUCE":
         return "Не докупать; при желании сократить"
     if action == "SELL":
         if score <= -4.0:

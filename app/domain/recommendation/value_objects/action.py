@@ -9,7 +9,7 @@ class ActionType(str, Enum):
     BUY = "BUY"
     ACCUMULATE = "ACCUMULATE"
     HOLD = "HOLD"
-    AVOID = "AVOID"
+    REDUCE = "REDUCE"  # не докупать / сократить (мягче, чем SELL)
     SELL = "SELL"
 
 
@@ -35,9 +35,9 @@ class Action:
         """Проверить, является ли действие докупкой понемногу."""
         return self.action_type == ActionType.ACCUMULATE
 
-    def is_avoid(self) -> bool:
-        """Проверить, является ли действие «не докупать / сократить»."""
-        return self.action_type == ActionType.AVOID
+    def is_reduce(self) -> bool:
+        """Проверить, является ли действие «не докупать / сократить» (REDUCE)."""
+        return self.action_type == ActionType.REDUCE
 
     @classmethod
     def from_string(cls, action_str: str) -> "Action":

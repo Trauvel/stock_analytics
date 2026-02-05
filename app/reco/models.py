@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, List, Optional
 
 
-Action = Literal["BUY", "ACCUMULATE", "HOLD", "AVOID", "SELL"]
+Action = Literal["BUY", "ACCUMULATE", "HOLD", "REDUCE", "SELL"]
 
 # Типы активов для разной логики scoring (commodity — не штрафовать за DY, fund — мягче тренд)
 AssetType = Literal["equity", "bond", "fund", "commodity"]
@@ -78,7 +78,7 @@ class RecoConfig:
     # Score границы: BUY / ACCUMULATE / HOLD / AVOID / SELL (по отзыву — 4 уровня)
     buy_score_cutoff: float = 2.0  # порог для BUY (агрессивно покупать)
     accumulate_score_min: float = 0.5  # порог для ACCUMULATE (докупать понемногу)
-    avoid_score_max: float = -1.0  # ниже → AVOID (не докупать / сократить)
+    avoid_score_max: float = -1.0  # ниже → REDUCE (не докупать / сократить)
     sell_score_cutoff: float = -2.0  # порог для SELL (явно продавать)
     max_buy_count: int = 4  # макс. число рекомендаций BUY в отчёте
 

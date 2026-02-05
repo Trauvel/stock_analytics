@@ -88,11 +88,11 @@ class GenerateRecommendationsUseCase:
             if r.action.is_buy(): return 0
             if r.action.is_accumulate(): return 1
             if r.action.is_hold(): return 2
-            if r.action.is_avoid(): return 3
+            if r.action.is_reduce(): return 3
             return 4  # SELL
         recommendations.sort(key=lambda r: (
             _action_order(r),
-            -r.score if r.action.is_buy() or r.action.is_accumulate() or r.action.is_hold() else r.score
+            -r.score if r.action.is_buy() or r.action.is_accumulate() or r.action.is_hold() or r.action.is_reduce() else r.score
         ))
         
         logger.info(f"Generated {len(recommendations)} recommendations")

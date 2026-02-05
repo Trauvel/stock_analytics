@@ -715,11 +715,13 @@ function getActionBadge(action, score, confidence) {
         'BUY': `<span class="badge bg-success fs-6 py-2 px-3">🟢 ПОКУПАТЬ</span>`,
         'ACCUMULATE': `<span class="badge bg-info fs-6 py-2 px-3">📈 ДОКУПАТЬ</span>`,
         'HOLD': `<span class="badge bg-secondary fs-6 py-2 px-3">⚪ ДЕРЖАТЬ</span>`,
-        'AVOID': `<span class="badge bg-warning text-dark fs-6 py-2 px-3">⚠️ НЕ ДОКУПАТЬ</span>`,
+        'REDUCE': `<span class="badge bg-warning text-dark fs-6 py-2 px-3">📉 Сократить</span>`,
         'SELL': `<span class="badge bg-danger fs-6 py-2 px-3">🔴 ПРОДАВАТЬ</span>`
     };
+    const confidenceLabels = { HIGH: 'Высокая уверенность', MEDIUM: 'Можно действовать', LOW: 'Наблюдение' };
     const confidenceBadge = confidence === 'HIGH' ? '⭐⭐⭐' : confidence === 'MEDIUM' ? '⭐⭐' : '⭐';
-    return `${badges[action] || badges['HOLD']} <small class="text-muted ms-2">${confidenceBadge} Score: ${score}</small>`;
+    const confidenceText = confidenceLabels[confidence] || confidence;
+    return `${badges[action] || badges['HOLD']} <small class="text-muted ms-2" title="${confidenceText}">${confidenceBadge}</small> <small class="text-muted">${confidenceText}</small> Score: ${score}`;
 }
 
 function buildRecommendationReasons(reco) {
@@ -802,7 +804,7 @@ function renderRecommendation(reco) {
         'BUY': 'border-success',
         'ACCUMULATE': 'border-info',
         'HOLD': 'border-secondary',
-        'AVOID': 'border-warning',
+        'REDUCE': 'border-warning',
         'SELL': 'border-danger'
     }[reco.action] || 'border-secondary';
     
@@ -856,23 +858,23 @@ async function loadRecommendations() {
         
         const recos = data.data.items;
         
-        // Обновляем счетчики (BUY, ACCUMULATE, HOLD, AVOID, SELL)
+        // Обновляем счетчики (BUY, ACCUMULATE, HOLD, REDUCE, SELL)
         const counts = {
             BUY: recos.filter(r => r.action === 'BUY').length,
             ACCUMULATE: recos.filter(r => r.action === 'ACCUMULATE').length,
             HOLD: recos.filter(r => r.action === 'HOLD').length,
-            AVOID: recos.filter(r => r.action === 'AVOID').length,
+            REDUCE: recos.filter(r => r.action === 'REDUCE' || r.action === 'AVOID').length,
             SELL: recos.filter(r => r.action === 'SELL').length
         };
         const buyEl = document.getElementById('buy-count');
         const accEl = document.getElementById('accumulate-count');
         const holdEl = document.getElementById('hold-count');
-        const avoidEl = document.getElementById('avoid-count');
+        const reduceEl = document.getElementById('reduce-count');
         const sellEl = document.getElementById('sell-count');
         if (buyEl) buyEl.textContent = counts.BUY;
         if (accEl) accEl.textContent = counts.ACCUMULATE;
         if (holdEl) holdEl.textContent = counts.HOLD;
-        if (avoidEl) avoidEl.textContent = counts.AVOID;
+        if (reduceEl) reduceEl.textContent = counts.REDUCE;
         if (sellEl) sellEl.textContent = counts.SELL;
         
         // Рендерим рекомендации
