@@ -43,6 +43,22 @@ function applyRoleUI() {
     if (loginLink) loginLink.classList.add('d-none');
 }
 
+// === Параметры анализа (для главной страницы) ===
+async function updateDividendTargetLabel() {
+    try {
+        const resp = await fetch(`${API_BASE}/config`);
+        const data = await resp.json();
+        if (!data?.ok || !data.data) return;
+        const target = Number(data.data.dividend_target_pct);
+        const el = document.getElementById('dividend-target-label');
+        if (el && !Number.isNaN(target)) {
+            el.textContent = target.toString();
+        }
+    } catch (e) {
+        console.warn('Cannot load config for dividend target label:', e);
+    }
+}
+
 // === Подсказки по сигналам (для "Детально") ===
 const SIGNAL_META = {
     PRICE_ABOVE_SMA200: {
@@ -667,6 +683,9 @@ document.addEventListener('DOMContentLoaded', function() {
 window.addEventListener('load', async () => {
     await loadAuthMe();
     applyRoleUI();
+
+    // Синхронизируем текст про целевую DY с настройками
+    updateDividendTargetLabel();
 
     loadReport();
     
