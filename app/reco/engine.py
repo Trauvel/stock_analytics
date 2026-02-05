@@ -100,8 +100,25 @@ def make_reco(
     if is_bond is None:
         is_bond = len(snapshot.symbol) == 12 and snapshot.symbol[:2].isalpha()
 
-    # === 1. Анализ дивидендов / купона (нормализация DY: выше cap не усиливает BUY) ===
-    if snapshot.dy_pct is not None:
+    # Тип актива: commodity (золото и т.п.) не штрафуем за DY; fund — мягче тренд
+    commodity_tickers = getattr(config, 'commodity_tickers', None) or ['TGLD']
+    fund_tickers = getattr(config, 'fund_tickers', None) or []
+    if snapshot.symbol in commodity_tickers:
+        asset_type = 'commodity'
+    elif snapshot.symbol in fund_tickers:
+        asset_type = 'fund'
+    else:
+        asset_type = getattr(snapshot, 'effective_asset_type', 'bond' if is_bond else 'equity')
+
+    # === 1. Анализ дивидендов / купона (для commodity не учитываем DY — защитный актив) ===
+    if asset_type == 'commodity':
+        reasons.append("○ Защитный актив (commodity): DY не учитывается")
+        # Можно дать небольшой плюс за цену выше SMA200
+        if snapshot.sma200 and snapshot.price and snapshot.price >= snapshot.sma200:
+            score += 0.5
+            reasons.append("✓ Цена выше SMA200")
+            confidence_factors.append(0.5)
+    elif snapshot.dy_pct is not None:
         dy_for_score = min(snapshot.dy_pct, config.dy_score_cap)  # нормализация
         if dy_for_score >= config.dy_buy_min:
             score += 1.5
@@ -110,12 +127,14 @@ def make_reco(
             if snapshot.dy_pct >= config.dy_very_high:
                 reasons.append(f"⚠ Высокая DY {snapshot.dy_pct:.1f}% — проверить устойчивость")
                 confidence_factors.append(0.5)
-                # бонус за «очень высокую DY» не даём (не score += 0.5)
             elif snapshot.dy_pct > config.dy_score_cap:
                 reasons.append(f"⚠ DY выше {config.dy_score_cap}% — проверить устойчивость")
-        elif snapshot.dy_pct < config.dy_buy_min * 0.5:
+        elif snapshot.dy_pct < config.dy_buy_min * 0.5 and asset_type != 'fund':
             score -= 0.5
             reasons.append(f"✗ Низкие дивиденды {snapshot.dy_pct:.1f}%")
+    elif asset_type == 'fund':
+        # Фонды: DY не обязательна, не штрафуем за отсутствие
+        pass
 
     # === 2–5 для акций; для облигаций — только доходность, SMA/52W вторичны ===
     if not is_bond:
@@ -133,14 +152,15 @@ def make_reco(
             else:
                 reasons.append(f"○ Цена около SMA200 ({d_vs_sma200:.1f}%)")
 
-        # === 3. Краткосрочный тренд (20 дней) ===
+        # === 3. Краткосрочный тренд (20 дней); для commodity/fund — мягче (вторичен) ===
+        trend_weight = 0.4 if asset_type in ('commodity', 'fund') else 0.8
         if snapshot.trend_pct_20d is not None:
             if snapshot.trend_pct_20d >= config.trend_up_min:
-                score += 0.8
+                score += trend_weight
                 reasons.append(f"✓ Восходящий тренд {snapshot.trend_pct_20d:.1f}%")
                 confidence_factors.append(1)
             elif snapshot.trend_pct_20d <= config.trend_down_max:
-                score -= 0.8
+                score -= trend_weight
                 reasons.append(f"✗ Нисходящий тренд {snapshot.trend_pct_20d:.1f}%")
                 confidence_factors.append(1)
 
@@ -185,18 +205,25 @@ def make_reco(
             score += 0.3
             confidence_factors.append(0.3)
 
-    # === Определение действия ===
+    # === Определение действия: BUY / ACCUMULATE / HOLD / AVOID / SELL (4 уровня по отзыву) ===
+    accumulate_min = getattr(config, 'accumulate_score_min', 0.5)
+    avoid_max = getattr(config, 'avoid_score_max', -1.0)
     price_below_sma200 = (
         snapshot.sma200 and snapshot.price and snapshot.price < snapshot.sma200
     )
-    if score >= config.buy_score_cutoff:
-        action = "BUY"
-        # Для BUY: цена не ниже SMA200 или подтверждённый фундамент (высокий score)
-        if not is_bond and price_below_sma200 and score < config.buy_score_if_below_sma200:
-            action = "HOLD"
-            reasons.append("○ BUY снижен до HOLD: цена ниже SMA200 без сильного фундамента")
-    elif score <= config.sell_score_cutoff:
+
+    if score <= config.sell_score_cutoff:
         action = "SELL"
+    elif score <= avoid_max:
+        action = "AVOID"
+    elif score >= config.buy_score_cutoff:
+        action = "BUY"
+        # Для BUY: цена не ниже SMA200 или сильный фундамент (облигации/commodity не трогаем)
+        if asset_type == 'equity' and price_below_sma200 and score < getattr(config, 'buy_score_if_below_sma200', 3.2):
+            action = "ACCUMULATE"
+            reasons.append("○ BUY → ACCUMULATE: цена ниже SMA200, можно докупать понемногу")
+    elif score >= accumulate_min:
+        action = "ACCUMULATE"
     else:
         action = "HOLD"
     
@@ -229,24 +256,22 @@ def _sizing_hint(
 ) -> Optional[str]:
     """Генерирует подсказку по размеру позиции."""
     if action == "BUY":
-        # Сильный сигнал на покупку
         if score >= 4.0:
             return "Увеличить позицию до 2× от базовой"
-        # Хорошие условия: большой дисконт к SMA200 + высокие дивиденды
         elif (snapshot.sma200 and snapshot.price and
               (snapshot.price < 0.9 * snapshot.sma200) and
               (snapshot.dy_pct and snapshot.dy_pct >= config.dy_score_cap)):
             return "Увеличить позицию до 1.5× от базовой"
-        else:
-            return "Базовая доля (1×)"
-    
-    elif action == "SELL":
+        return "Базовая доля (1×)"
+    if action == "ACCUMULATE":
+        return "Докупать понемногу"
+    if action == "AVOID":
+        return "Не докупать; при желании сократить"
+    if action == "SELL":
         if score <= -4.0:
             return "Закрыть позицию полностью"
-        elif score <= -3.0:
+        if score <= -3.0:
             return "Сократить позицию на 50%"
-        else:
-            return "Сократить позицию на 25%"
-    
+        return "Сократить позицию на 25%"
     return None
 

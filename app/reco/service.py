@@ -119,26 +119,23 @@ def get_recommendations(
             logger.error(f"Error processing {symbol}: {e}")
             continue
     
-    # Сортировка: BUY по убыванию score, SELL по возрастанию
+    # Сортировка: BUY → ACCUMULATE → HOLD → AVOID → SELL
     def sort_key(r):
-        if r['action'] == 'BUY':
-            return (0, -r['score'])  # BUY первыми, по убыванию score
-        elif r['action'] == 'SELL':
-            return (2, r['score'])   # SELL последними, по возрастанию score
-        else:
-            return (1, -r['score'])  # HOLD в середине
+        order = {'BUY': 0, 'ACCUMULATE': 1, 'HOLD': 2, 'AVOID': 3, 'SELL': 4}
+        idx = order.get(r['action'], 2)
+        return (idx, -r['score'] if r['action'] in ('BUY', 'ACCUMULATE', 'HOLD') else r['score'])
     
     recommendations.sort(key=sort_key)
 
-    # BUY — редкость: оставляем не более max_buy_count лучших по score, остальные → HOLD
+    # BUY — редкость: не более max_buy_count; лишние → ACCUMULATE
     max_buy = getattr(config, 'max_buy_count', 4)
     buy_indices = [i for i, r in enumerate(recommendations) if r['action'] == 'BUY']
     if len(buy_indices) > max_buy:
         for i in buy_indices[max_buy:]:
-            recommendations[i]['action'] = 'HOLD'
+            recommendations[i]['action'] = 'ACCUMULATE'
             if 'reasons' in recommendations[i]:
                 recommendations[i]['reasons'] = list(recommendations[i]['reasons'])
-                recommendations[i]['reasons'].append('○ BUY ограничен топ-N идеями')
+                recommendations[i]['reasons'].append('○ BUY ограничен топ-N → докупать понемногу')
         recommendations.sort(key=sort_key)
 
     logger.info(f"Generated {len(recommendations)} recommendations")

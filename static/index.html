@@ -97,28 +97,44 @@
             
             <!-- Кратко: Рекомендации -->
             <div class="tab-pane fade show active" id="recommendations">
-                <!-- Сводка -->
-                <div class="row mb-3">
-                    <div class="col-md-4">
+                <!-- Сводка: BUY / ACCUMULATE / HOLD / AVOID / SELL -->
+                <div class="row mb-3 g-2">
+                    <div class="col-6 col-md">
                         <div class="card text-center border-success">
-                            <div class="card-body">
-                                <h6 class="text-muted">🟢 Покупать</h6>
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">🟢 Покупать</h6>
                                 <h2 id="buy-count" class="text-success mb-0">-</h2>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-6 col-md">
+                        <div class="card text-center border-info">
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">📈 Докупать</h6>
+                                <h2 id="accumulate-count" class="text-info mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md">
                         <div class="card text-center border-secondary">
-                            <div class="card-body">
-                                <h6 class="text-muted">⚪ Держать</h6>
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">⚪ Держать</h6>
                                 <h2 id="hold-count" class="text-secondary mb-0">-</h2>
                             </div>
                         </div>
                     </div>
-                    <div class="col-md-4">
+                    <div class="col-6 col-md">
+                        <div class="card text-center border-warning">
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">⚠️ Не докупать</h6>
+                                <h2 id="avoid-count" class="text-warning mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md">
                         <div class="card text-center border-danger">
-                            <div class="card-body">
-                                <h6 class="text-muted">🔴 Продавать</h6>
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">🔴 Продавать</h6>
                                 <h2 id="sell-count" class="text-danger mb-0">-</h2>
                             </div>
                         </div>
@@ -128,10 +144,12 @@
                 <!-- Фильтры -->
                 <div class="row mb-3">
                     <div class="col-12">
-                        <div class="btn-group" role="group">
+                        <div class="btn-group flex-wrap" role="group">
                             <button type="button" class="btn btn-outline-primary active" data-filter="all">Все</button>
                             <button type="button" class="btn btn-outline-success" data-filter="BUY">Покупать</button>
+                            <button type="button" class="btn btn-outline-info" data-filter="ACCUMULATE">Докупать</button>
                             <button type="button" class="btn btn-outline-secondary" data-filter="HOLD">Держать</button>
+                            <button type="button" class="btn btn-outline-warning" data-filter="AVOID">Не докупать</button>
                             <button type="button" class="btn btn-outline-danger" data-filter="SELL">Продавать</button>
                         </div>
                     </div>

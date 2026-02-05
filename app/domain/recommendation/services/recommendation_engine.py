@@ -27,9 +27,13 @@ class RecommendationConfig:
         buy_score_if_below_sma200: float = 3.2,
         trend_up_min: float = 0.5,
         trend_down_max: float = -0.5,
-        buy_score_cutoff: float = 2.8,
+        buy_score_cutoff: float = 2.0,
+        accumulate_score_min: float = 0.5,
+        avoid_score_max: float = -1.0,
         sell_score_cutoff: float = -2.0,
         max_buy_count: int = 4,
+        commodity_tickers: Optional[List[str]] = None,
+        fund_tickers: Optional[List[str]] = None,
         near_52w_low_threshold: float = 0.3,
         near_52w_high_threshold: float = 0.9,
         event_predictor_enabled: bool = True,
@@ -44,8 +48,12 @@ class RecommendationConfig:
         self.trend_up_min = trend_up_min
         self.trend_down_max = trend_down_max
         self.buy_score_cutoff = buy_score_cutoff
+        self.accumulate_score_min = accumulate_score_min
+        self.avoid_score_max = avoid_score_max
         self.sell_score_cutoff = sell_score_cutoff
         self.max_buy_count = max_buy_count
+        self.commodity_tickers = commodity_tickers or ["TGLD"]
+        self.fund_tickers = fund_tickers or []
         self.near_52w_low_threshold = near_52w_low_threshold
         self.near_52w_high_threshold = near_52w_high_threshold
         self.event_predictor_enabled = event_predictor_enabled
@@ -109,9 +117,18 @@ class RecommendationEngine:
                         confidence_factors.append(1.0)
         
         is_bond = _is_bond_symbol(stock.symbol)
+        asset_type = "commodity" if stock.symbol in self.config.commodity_tickers else (
+            "fund" if stock.symbol in self.config.fund_tickers else ("bond" if is_bond else "equity")
+        )
 
-        # === 1. Анализ дивидендов (нормализация: DY > dy_score_cap не усиливает BUY) ===
-        if stock.dividend_yield:
+        # === 1. Дивиденды (commodity не штрафуем за DY — защитный актив) ===
+        if asset_type == "commodity":
+            reasons.append("○ Защитный актив (commodity): DY не учитывается")
+            if stock.price and stock.sma_200 and stock.price.to_float() >= stock.sma_200.to_float():
+                score += 0.5
+                reasons.append("✓ Цена выше SMA200")
+                confidence_factors.append(0.5)
+        elif stock.dividend_yield:
             dy_value = stock.dividend_yield.value
             dy_for_score = min(dy_value, getattr(self.config, 'dy_score_cap', 12.0))
             if dy_for_score >= self.config.dy_buy_min:
@@ -123,7 +140,7 @@ class RecommendationEngine:
                     confidence_factors.append(0.5)
                 elif dy_value > getattr(self.config, 'dy_score_cap', 12.0):
                     reasons.append(f"⚠ DY выше порога — проверить устойчивость")
-            elif dy_value < self.config.dy_buy_min * 0.5:
+            elif dy_value < self.config.dy_buy_min * 0.5 and asset_type != "fund":
                 score -= 0.5
                 reasons.append(f"✗ Низкие дивиденды {dy_value:.1f}%")
 
@@ -142,15 +159,16 @@ class RecommendationEngine:
                 else:
                     reasons.append(f"○ Цена около SMA200 ({discount:.1f}%)")
         
-        # === 3. Краткосрочный тренд (20 дней, только акции) ===
+        # === 3. Краткосрочный тренд (20 дней); для commodity/fund — мягче ===
+        trend_weight = 0.4 if asset_type in ("commodity", "fund") else 0.8
         if not is_bond and stock.price and stock.sma_20:
             trend_pct = stock.price.percentage_diff(stock.sma_20)
             if trend_pct >= self.config.trend_up_min:
-                score += 0.8
+                score += trend_weight
                 reasons.append(f"✓ Восходящий тренд {trend_pct:.1f}%")
                 confidence_factors.append(1)
             elif trend_pct <= self.config.trend_down_max:
-                score -= 0.8
+                score -= trend_weight
                 reasons.append(f"✗ Нисходящий тренд {trend_pct:.1f}%")
                 confidence_factors.append(1)
         
@@ -183,21 +201,26 @@ class RecommendationEngine:
                 score -= 0.3 * (bearish_count - bullish_count)
                 confidence_factors.append(0.3)
         
-        # === Определение действия ===
+        # === Определение действия: BUY / ACCUMULATE / HOLD / AVOID / SELL ===
         price_below_sma200 = (
             stock.price and stock.sma_200 and stock.price.to_float() < stock.sma_200.to_float()
         )
-        buy_cutoff = getattr(self.config, 'buy_score_cutoff', 2.8)
-        if score >= buy_cutoff:
+        buy_cutoff = getattr(self.config, 'buy_score_cutoff', 2.0)
+        accum_min = getattr(self.config, 'accumulate_score_min', 0.5)
+        avoid_max = getattr(self.config, 'avoid_score_max', -1.0)
+        if score <= self.config.sell_score_cutoff:
+            action = Action(action_type=ActionType.SELL)
+        elif score <= avoid_max:
+            action = Action(action_type=ActionType.AVOID)
+        elif score >= buy_cutoff:
             action = Action(action_type=ActionType.BUY)
-            # Для BUY: цена не ниже SMA200 или сильный фундамент
-            if not is_bond and price_below_sma200:
+            if asset_type == "equity" and price_below_sma200:
                 need = getattr(self.config, 'buy_score_if_below_sma200', 3.2)
                 if score < need:
-                    action = Action(action_type=ActionType.HOLD)
-                    reasons.append("○ BUY снижен до HOLD: цена ниже SMA200 без сильного фундамента")
-        elif score <= self.config.sell_score_cutoff:
-            action = Action(action_type=ActionType.SELL)
+                    action = Action(action_type=ActionType.ACCUMULATE)
+                    reasons.append("○ BUY → ACCUMULATE: цена ниже SMA200, можно докупать понемногу")
+        elif score >= accum_min:
+            action = Action(action_type=ActionType.ACCUMULATE)
         else:
             action = Action(action_type=ActionType.HOLD)
         
@@ -237,10 +260,12 @@ class RecommendationEngine:
                   stock.price < stock.sma_200 * 0.9 and
                   stock.dividend_yield and stock.dividend_yield.value >= getattr(self.config, 'dy_score_cap', 12.0)):
                 return "Увеличить позицию до 1.5× от базовой"
-            else:
-                return "Базовая доля (1×)"
-        
-        elif action.is_sell():
+            return "Базовая доля (1×)"
+        if action.is_accumulate():
+            return "Докупать понемногу"
+        if action.is_avoid():
+            return "Не докупать; при желании сократить"
+        if action.is_sell():
             if score <= -4.0:
                 return "Закрыть позицию полностью"
             elif score <= -3.0:

@@ -4,7 +4,10 @@ from dataclasses import dataclass
 from typing import Literal, List, Optional
 
 
-Action = Literal["BUY", "HOLD", "SELL"]
+Action = Literal["BUY", "ACCUMULATE", "HOLD", "AVOID", "SELL"]
+
+# Типы активов для разной логики scoring (commodity — не штрафовать за DY, fund — мягче тренд)
+AssetType = Literal["equity", "bond", "fund", "commodity"]
 
 
 def _is_bond_symbol(symbol: str) -> bool:
@@ -28,12 +31,20 @@ class TickerSnapshot:
     vol_avg_20d: Optional[float] = None
     signals: List[str] = None
     is_bond: Optional[bool] = None  # если None — выводится из symbol
+    asset_type: Optional[str] = None  # equity | bond | fund | commodity (для commodity не штрафуем за DY)
     
     def __post_init__(self):
         if self.signals is None:
             self.signals = []
         if self.is_bond is None:
             self.is_bond = _is_bond_symbol(self.symbol)
+    
+    @property
+    def effective_asset_type(self) -> str:
+        """Тип актива: из поля или по умолчанию equity/bond."""
+        if self.asset_type:
+            return self.asset_type
+        return "bond" if self.is_bond else "equity"
 
 
 @dataclass
@@ -64,10 +75,12 @@ class RecoConfig:
     trend_up_min: float = 0.5  # минимальный положительный тренд (%)
     trend_down_max: float = -0.5  # максимальный отрицательный тренд (%)
 
-    # Score границы (BUY — редкость, 2–4 идеи)
-    buy_score_cutoff: float = 2.8  # порог для BUY
-    sell_score_cutoff: float = -2.0  # порог для SELL
-    max_buy_count: int = 4  # макс. число рекомендаций BUY в отчёте (остальные → HOLD)
+    # Score границы: BUY / ACCUMULATE / HOLD / AVOID / SELL (по отзыву — 4 уровня)
+    buy_score_cutoff: float = 2.0  # порог для BUY (агрессивно покупать)
+    accumulate_score_min: float = 0.5  # порог для ACCUMULATE (докупать понемногу)
+    avoid_score_max: float = -1.0  # ниже → AVOID (не докупать / сократить)
+    sell_score_cutoff: float = -2.0  # порог для SELL (явно продавать)
+    max_buy_count: int = 4  # макс. число рекомендаций BUY в отчёте
 
     # Дополнительные параметры
     near_52w_low_threshold: float = 0.3  # нижняя треть диапазона
@@ -77,6 +90,10 @@ class RecoConfig:
     event_predictor_enabled: bool = True
     event_predictor_weights: dict = None
 
+    # Типы активов: commodity (золото и т.п.) — не штрафовать за DY; fund — мягче тренд
+    commodity_tickers: List[str] = None  # например ["TGLD"]
+    fund_tickers: List[str] = None  # ETF/фонды
+
     def __post_init__(self):
         if self.event_predictor_weights is None:
             self.event_predictor_weights = {
@@ -85,6 +102,10 @@ class RecoConfig:
                 'NEGATIVE_SIGNAL': -1.0,
                 'LOW': 0.0
             }
+        if self.commodity_tickers is None:
+            self.commodity_tickers = ["TGLD"]  # золото и подобные — не штрафуем за отсутствие DY
+        if self.fund_tickers is None:
+            self.fund_tickers = []
 
 
 @dataclass

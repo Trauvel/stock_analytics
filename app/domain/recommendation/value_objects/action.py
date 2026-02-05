@@ -5,9 +5,11 @@ from dataclasses import dataclass
 
 
 class ActionType(str, Enum):
-    """Типы действий рекомендации."""
+    """Типы действий рекомендации (4 уровня по отзыву)."""
     BUY = "BUY"
+    ACCUMULATE = "ACCUMULATE"
     HOLD = "HOLD"
+    AVOID = "AVOID"
     SELL = "SELL"
 
 
@@ -28,7 +30,15 @@ class Action:
     def is_hold(self) -> bool:
         """Проверить, является ли действие удержанием."""
         return self.action_type == ActionType.HOLD
-    
+
+    def is_accumulate(self) -> bool:
+        """Проверить, является ли действие докупкой понемногу."""
+        return self.action_type == ActionType.ACCUMULATE
+
+    def is_avoid(self) -> bool:
+        """Проверить, является ли действие «не докупать / сократить»."""
+        return self.action_type == ActionType.AVOID
+
     @classmethod
     def from_string(cls, action_str: str) -> "Action":
         """Создать Action из строки."""

@@ -16,14 +16,20 @@ buy_score_if_below_sma200: 3.2  # Минимальный score для BUY при
 trend_up_min: 0.5         # Минимальный положительный тренд за 20 дней (%)
 trend_down_max: -0.5      # Максимальный отрицательный тренд (%)
 
-# === Границы scoring (BUY — редкость, 2–4 идеи) ===
-buy_score_cutoff: 2.8     # Порог score для BUY
-sell_score_cutoff: -2.0   # Порог score для SELL
-max_buy_count: 4          # Макс. число рекомендаций BUY в отчёте
+# === Границы scoring: BUY / ACCUMULATE / HOLD / AVOID / SELL (4 уровня по отзыву) ===
+buy_score_cutoff: 2.0     # BUY — агрессивно покупать
+accumulate_score_min: 0.5  # ACCUMULATE — докупать понемногу
+avoid_score_max: -1.0      # Ниже → AVOID (не докупать / сократить)
+sell_score_cutoff: -2.0    # SELL — явно продавать
+max_buy_count: 4           # Макс. число BUY в отчёте (лишние → ACCUMULATE)
 
 # === 52W диапазон ===
 near_52w_low_threshold: 0.3   # Нижняя треть диапазона (0-0.3)
 near_52w_high_threshold: 0.9  # Верхняя граница (0.9-1.0)
+
+# === Типы активов (commodity — не штрафовать за DY; fund — мягче тренд) ===
+commodity_tickers: ["TGLD"]   # золото и подобные
+fund_tickers: []              # ETF/фонды при необходимости
 
 # === Модуль предсказания событий ===
 event_predictor:
