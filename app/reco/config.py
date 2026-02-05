@@ -5,6 +5,7 @@ from typing import Optional
 import yaml
 
 from .models import RecoConfig
+from app.config.loader import get_config
 
 
 _config_cache: Optional[RecoConfig] = None
@@ -38,6 +39,10 @@ def load_reco_config(config_path: Optional[str] = None) -> RecoConfig:
         ep_config = yaml_data.pop('event_predictor')
         yaml_data['event_predictor_enabled'] = ep_config.get('enabled', True)
         yaml_data['event_predictor_weights'] = ep_config.get('weight', {})
+    
+    # Синхронизируем минимальную DY для BUY с глобальной целевой див. доходностью
+    app_cfg = get_config()
+    yaml_data['dy_buy_min'] = app_cfg.dividend_target_pct
     
     return RecoConfig(**yaml_data)
 

@@ -64,9 +64,12 @@ class ApplicationContainer(containers.DeclarativeContainer):
         """Загрузить конфигурацию рекомендаций."""
         try:
             from app.reco.config import get_reco_config
+            from app.config.loader import get_config
             old_config = get_reco_config()
+            app_cfg = get_config()
             return RecommendationConfig(
-                dy_buy_min=old_config.dy_buy_min,
+                # Минимальная DY для BUY синхронизируется с глобальной целевой DY
+                dy_buy_min=getattr(app_cfg, "dividend_target_pct", old_config.dy_buy_min),
                 dy_very_high=old_config.dy_very_high,
                 dy_score_cap=getattr(old_config, 'dy_score_cap', 12.0),
                 max_discount_vs_sma200=old_config.max_discount_vs_sma200,
