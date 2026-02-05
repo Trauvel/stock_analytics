@@ -97,7 +97,7 @@
             
             <!-- Кратко: Рекомендации -->
             <div class="tab-pane fade show active" id="recommendations">
-                <!-- Сводка: BUY / ACCUMULATE / HOLD / REDUCE / SELL -->
+                <!-- Сводка: BUY / ACCUMULATE / HOLD_STRONG / HOLD_NEUTRAL / REDUCE / SELL -->
                 <div class="row mb-3 g-2">
                     <div class="col-6 col-md">
                         <div class="card text-center border-success">
@@ -116,10 +116,18 @@
                         </div>
                     </div>
                     <div class="col-6 col-md">
+                        <div class="card text-center border-primary">
+                            <div class="card-body py-2">
+                                <h6 class="text-muted small mb-0">🔵 Держать (можно докупать)</h6>
+                                <h2 id="hold-strong-count" class="text-primary mb-0">-</h2>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-6 col-md">
                         <div class="card text-center border-secondary">
                             <div class="card-body py-2">
-                                <h6 class="text-muted small mb-0">⚪ Держать</h6>
-                                <h2 id="hold-count" class="text-secondary mb-0">-</h2>
+                                <h6 class="text-muted small mb-0">⚪ Держать (нейтр.)</h6>
+                                <h2 id="hold-neutral-count" class="text-secondary mb-0">-</h2>
                             </div>
                         </div>
                     </div>
@@ -148,7 +156,8 @@
                             <button type="button" class="btn btn-outline-primary active" data-filter="all">Все</button>
                             <button type="button" class="btn btn-outline-success" data-filter="BUY">Покупать</button>
                             <button type="button" class="btn btn-outline-info" data-filter="ACCUMULATE">Докупать</button>
-                            <button type="button" class="btn btn-outline-secondary" data-filter="HOLD">Держать</button>
+                            <button type="button" class="btn btn-outline-primary" data-filter="HOLD_STRONG">Держать (докупать)</button>
+                            <button type="button" class="btn btn-outline-secondary" data-filter="HOLD_NEUTRAL">Держать (нейтр.)</button>
                             <button type="button" class="btn btn-outline-warning" data-filter="REDUCE">Сократить</button>
                             <button type="button" class="btn btn-outline-danger" data-filter="SELL">Продавать</button>
                         </div>

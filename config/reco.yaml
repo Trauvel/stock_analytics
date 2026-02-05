@@ -27,9 +27,13 @@ max_buy_count: 4           # Макс. число BUY в отчёте (лишн�
 near_52w_low_threshold: 0.3   # Нижняя треть диапазона (0-0.3)
 near_52w_high_threshold: 0.9  # Верхняя граница (0.9-1.0)
 
-# === Типы активов (commodity — не штрафовать за DY; fund — мягче тренд) ===
+# === Типы активов (commodity — не штрафовать за DY и за нисходящий тренд) ===
 commodity_tickers: ["TGLD"]   # золото и подобные
 fund_tickers: []              # ETF/фонды при необходимости
+
+# === Контекст рынка (sideways | bull | bear) ===
+# bull → чаще ACCUMULATE; bear → усиливается REDUCE; sideways — по умолчанию
+market_regime: sideways
 
 # === Модуль предсказания событий ===
 event_predictor:

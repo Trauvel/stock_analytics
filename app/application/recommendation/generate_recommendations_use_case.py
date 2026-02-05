@@ -83,13 +83,14 @@ class GenerateRecommendationsUseCase:
                 logger.error(f"Error generating recommendation for {stock.symbol}: {e}")
                 continue
         
-        # Сортировка: BUY → ACCUMULATE → HOLD → AVOID → SELL
+        # Сортировка: BUY → ACCUMULATE → HOLD_STRONG → HOLD_NEUTRAL → REDUCE → SELL
         def _action_order(r):
             if r.action.is_buy(): return 0
             if r.action.is_accumulate(): return 1
-            if r.action.is_hold(): return 2
-            if r.action.is_reduce(): return 3
-            return 4  # SELL
+            if r.action.is_hold_strong(): return 2
+            if r.action.is_hold_neutral(): return 3
+            if r.action.is_reduce(): return 4
+            return 5  # SELL
         recommendations.sort(key=lambda r: (
             _action_order(r),
             -r.score if r.action.is_buy() or r.action.is_accumulate() or r.action.is_hold() or r.action.is_reduce() else r.score

@@ -34,6 +34,7 @@ class RecommendationConfig:
         max_buy_count: int = 4,
         commodity_tickers: Optional[List[str]] = None,
         fund_tickers: Optional[List[str]] = None,
+        market_regime: str = "sideways",
         near_52w_low_threshold: float = 0.3,
         near_52w_high_threshold: float = 0.9,
         event_predictor_enabled: bool = True,
@@ -54,6 +55,7 @@ class RecommendationConfig:
         self.max_buy_count = max_buy_count
         self.commodity_tickers = commodity_tickers or ["TGLD"]
         self.fund_tickers = fund_tickers or []
+        self.market_regime = market_regime or "sideways"
         self.near_52w_low_threshold = near_52w_low_threshold
         self.near_52w_high_threshold = near_52w_high_threshold
         self.event_predictor_enabled = event_predictor_enabled
@@ -159,18 +161,21 @@ class RecommendationEngine:
                 else:
                     reasons.append(f"○ Цена около SMA200 ({discount:.1f}%)")
         
-        # === 3. Краткосрочный тренд (20 дней); для commodity/fund — мягче ===
-        trend_weight = 0.4 if asset_type in ("commodity", "fund") else 0.8
+        # === 3. Краткосрочный тренд; для commodity — не штрафовать за нисходящий ===
+        trend_up_weight = 0.4 if asset_type in ("commodity", "fund") else 0.8
+        trend_down_weight = 0.0 if asset_type == "commodity" else (0.4 if asset_type == "fund" else 0.8)
         if not is_bond and stock.price and stock.sma_20:
             trend_pct = stock.price.percentage_diff(stock.sma_20)
             if trend_pct >= self.config.trend_up_min:
-                score += trend_weight
+                score += trend_up_weight
                 reasons.append(f"✓ Восходящий тренд {trend_pct:.1f}%")
                 confidence_factors.append(1)
-            elif trend_pct <= self.config.trend_down_max:
-                score -= trend_weight
+            elif trend_pct <= self.config.trend_down_max and trend_down_weight > 0:
+                score -= trend_down_weight
                 reasons.append(f"✗ Нисходящий тренд {trend_pct:.1f}%")
                 confidence_factors.append(1)
+            elif asset_type == "commodity" and trend_pct <= self.config.trend_down_max:
+                reasons.append(f"○ Тренд {trend_pct:.1f}% (commodity — без штрафа)")
         
         # === 4. Позиция в 52W диапазоне (только акции) ===
         if is_bond:
@@ -201,31 +206,45 @@ class RecommendationEngine:
                 score -= 0.3 * (bearish_count - bullish_count)
                 confidence_factors.append(0.3)
         
-        # === Определение действия: BUY / ACCUMULATE / HOLD / REDUCE / SELL ===
+        # === Контекст рынка ===
+        regime = getattr(self.config, 'market_regime', 'sideways') or 'sideways'
+        regime_mod = {'bull': 0.25, 'bear': -0.25, 'sideways': 0.0}.get(regime.lower(), 0.0)
+        score_for_action = score + regime_mod
+        if regime_mod != 0:
+            reasons.append(f"○ Режим рынка: {regime}")
+
+        # === Определение действия: BUY / ACCUMULATE / HOLD_STRONG | HOLD_NEUTRAL / REDUCE / SELL ===
         price_below_sma200 = (
             stock.price and stock.sma_200 and stock.price.to_float() < stock.sma_200.to_float()
         )
+        price_above_sma200 = stock.price and stock.sma_200 and stock.price.to_float() >= stock.sma_200.to_float()
         buy_cutoff = getattr(self.config, 'buy_score_cutoff', 2.0)
         accum_min = getattr(self.config, 'accumulate_score_min', 0.5)
         reduce_max = getattr(self.config, 'avoid_score_max', -1.0)
-        if score <= self.config.sell_score_cutoff:
+        if score_for_action <= self.config.sell_score_cutoff:
             action = Action(action_type=ActionType.SELL)
-        elif score <= reduce_max:
+        elif score_for_action <= reduce_max:
             action = Action(action_type=ActionType.REDUCE)
-        elif score >= buy_cutoff:
+        elif score_for_action >= buy_cutoff:
             action = Action(action_type=ActionType.BUY)
             if asset_type == "equity" and price_below_sma200:
                 need = getattr(self.config, 'buy_score_if_below_sma200', 3.2)
-                if score < need:
+                if score_for_action < need:
                     action = Action(action_type=ActionType.ACCUMULATE)
                     reasons.append("○ BUY → ACCUMULATE: цена ниже SMA200, можно докупать понемногу")
-        elif score >= accum_min:
+        elif score_for_action >= accum_min:
             action = Action(action_type=ActionType.ACCUMULATE)
         else:
-            action = Action(action_type=ActionType.HOLD)
+            trend_pct = stock.price.percentage_diff(stock.sma_20) if (stock.price and stock.sma_20) else None
+            if score >= 0.2 or (price_above_sma200 and (trend_pct is None or trend_pct > -2.0)):
+                action = Action(action_type=ActionType.HOLD_STRONG)
+                reasons.append("○ Держать; можно докупать при просадках")
+            else:
+                action = Action(action_type=ActionType.HOLD_NEUTRAL)
+                reasons.append("○ Ничего не делаем")
 
         # Защитный актив (commodity) выше SMA200: разрешаем ACCUMULATE при слабом score
-        if action.action_type == ActionType.HOLD and asset_type == "commodity" and stock.price and stock.sma_200:
+        if action.is_hold() and asset_type == "commodity" and stock.price and stock.sma_200:
             if stock.price.to_float() >= stock.sma_200.to_float() and score >= -0.5:
                 action = Action(action_type=ActionType.ACCUMULATE)
                 reasons.append("○ Защитный актив выше SMA200 — можно докупать понемногу")
@@ -269,6 +288,10 @@ class RecommendationEngine:
             return "Базовая доля (1×)"
         if action.is_accumulate():
             return "Докупать понемногу"
+        if action.is_hold_strong():
+            return "Держать; докупать при просадках"
+        if action.is_hold_neutral():
+            return "Ничего не делаем"
         if action.is_reduce():
             return "Не докупать; при желании сократить"
         if action.is_sell():

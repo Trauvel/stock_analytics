@@ -119,9 +119,9 @@ def get_recommendations(
             logger.error(f"Error processing {symbol}: {e}")
             continue
     
-    # Сортировка: BUY → ACCUMULATE → HOLD → REDUCE → SELL
+    # Сортировка: BUY → ACCUMULATE → HOLD_STRONG → HOLD_NEUTRAL → REDUCE → SELL
     def sort_key(r):
-        order = {'BUY': 0, 'ACCUMULATE': 1, 'HOLD': 2, 'REDUCE': 3, 'SELL': 4}
+        order = {'BUY': 0, 'ACCUMULATE': 1, 'HOLD_STRONG': 2, 'HOLD_NEUTRAL': 3, 'REDUCE': 4, 'SELL': 5}
         idx = order.get(r['action'], 2)
         return (idx, -r['score'] if r['action'] in ('BUY', 'ACCUMULATE', 'HOLD') else r['score'])
     

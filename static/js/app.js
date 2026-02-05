@@ -714,6 +714,8 @@ function getActionBadge(action, score, confidence) {
     const badges = {
         'BUY': `<span class="badge bg-success fs-6 py-2 px-3">🟢 ПОКУПАТЬ</span>`,
         'ACCUMULATE': `<span class="badge bg-info fs-6 py-2 px-3">📈 ДОКУПАТЬ</span>`,
+        'HOLD_STRONG': `<span class="badge bg-primary fs-6 py-2 px-3">🔵 ДЕРЖАТЬ (докупать при просадках)</span>`,
+        'HOLD_NEUTRAL': `<span class="badge bg-secondary fs-6 py-2 px-3">⚪ ДЕРЖАТЬ (нейтр.)</span>`,
         'HOLD': `<span class="badge bg-secondary fs-6 py-2 px-3">⚪ ДЕРЖАТЬ</span>`,
         'REDUCE': `<span class="badge bg-warning text-dark fs-6 py-2 px-3">📉 Сократить</span>`,
         'SELL': `<span class="badge bg-danger fs-6 py-2 px-3">🔴 ПРОДАВАТЬ</span>`
@@ -803,6 +805,8 @@ function renderRecommendation(reco) {
     const cardClass = {
         'BUY': 'border-success',
         'ACCUMULATE': 'border-info',
+        'HOLD_STRONG': 'border-primary',
+        'HOLD_NEUTRAL': 'border-secondary',
         'HOLD': 'border-secondary',
         'REDUCE': 'border-warning',
         'SELL': 'border-danger'
@@ -858,22 +862,25 @@ async function loadRecommendations() {
         
         const recos = data.data.items;
         
-        // Обновляем счетчики (BUY, ACCUMULATE, HOLD, REDUCE, SELL)
+        // Обновляем счетчики (BUY, ACCUMULATE, HOLD_STRONG, HOLD_NEUTRAL, REDUCE, SELL)
         const counts = {
             BUY: recos.filter(r => r.action === 'BUY').length,
             ACCUMULATE: recos.filter(r => r.action === 'ACCUMULATE').length,
-            HOLD: recos.filter(r => r.action === 'HOLD').length,
+            HOLD_STRONG: recos.filter(r => r.action === 'HOLD_STRONG').length,
+            HOLD_NEUTRAL: recos.filter(r => r.action === 'HOLD_NEUTRAL' || r.action === 'HOLD').length,
             REDUCE: recos.filter(r => r.action === 'REDUCE' || r.action === 'AVOID').length,
             SELL: recos.filter(r => r.action === 'SELL').length
         };
         const buyEl = document.getElementById('buy-count');
         const accEl = document.getElementById('accumulate-count');
-        const holdEl = document.getElementById('hold-count');
+        const holdStrongEl = document.getElementById('hold-strong-count');
+        const holdNeutralEl = document.getElementById('hold-neutral-count');
         const reduceEl = document.getElementById('reduce-count');
         const sellEl = document.getElementById('sell-count');
         if (buyEl) buyEl.textContent = counts.BUY;
         if (accEl) accEl.textContent = counts.ACCUMULATE;
-        if (holdEl) holdEl.textContent = counts.HOLD;
+        if (holdStrongEl) holdStrongEl.textContent = counts.HOLD_STRONG;
+        if (holdNeutralEl) holdNeutralEl.textContent = counts.HOLD_NEUTRAL;
         if (reduceEl) reduceEl.textContent = counts.REDUCE;
         if (sellEl) sellEl.textContent = counts.SELL;
         

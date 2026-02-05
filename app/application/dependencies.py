@@ -84,6 +84,7 @@ class ApplicationContainer(containers.DeclarativeContainer):
                 max_buy_count=getattr(old_config, 'max_buy_count', 4),
                 commodity_tickers=getattr(old_config, 'commodity_tickers', None) or ['TGLD'],
                 fund_tickers=getattr(old_config, 'fund_tickers', None) or [],
+                market_regime=getattr(old_config, 'market_regime', 'sideways') or 'sideways',
                 near_52w_low_threshold=old_config.near_52w_low_threshold,
                 near_52w_high_threshold=old_config.near_52w_high_threshold,
                 event_predictor_enabled=old_config.event_predictor_enabled,

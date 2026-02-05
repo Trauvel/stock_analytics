@@ -152,17 +152,20 @@ def make_reco(
             else:
                 reasons.append(f"○ Цена около SMA200 ({d_vs_sma200:.1f}%)")
 
-        # === 3. Краткосрочный тренд (20 дней); для commodity/fund — мягче (вторичен) ===
-        trend_weight = 0.4 if asset_type in ('commodity', 'fund') else 0.8
+        # === 3. Краткосрочный тренд; для commodity — не штрафовать за нисходящий (защитный актив) ===
+        trend_up_weight = 0.4 if asset_type in ('commodity', 'fund') else 0.8
+        trend_down_weight = 0.0 if asset_type == 'commodity' else (0.4 if asset_type == 'fund' else 0.8)
         if snapshot.trend_pct_20d is not None:
             if snapshot.trend_pct_20d >= config.trend_up_min:
-                score += trend_weight
+                score += trend_up_weight
                 reasons.append(f"✓ Восходящий тренд {snapshot.trend_pct_20d:.1f}%")
                 confidence_factors.append(1)
-            elif snapshot.trend_pct_20d <= config.trend_down_max:
-                score -= trend_weight
+            elif snapshot.trend_pct_20d <= config.trend_down_max and trend_down_weight > 0:
+                score -= trend_down_weight
                 reasons.append(f"✗ Нисходящий тренд {snapshot.trend_pct_20d:.1f}%")
                 confidence_factors.append(1)
+            elif asset_type == 'commodity' and snapshot.trend_pct_20d <= config.trend_down_max:
+                reasons.append(f"○ Тренд {snapshot.trend_pct_20d:.1f}% (commodity — без штрафа)")
 
         # === 4. Позиция в 52W диапазоне ===
         if snapshot.high_52w and snapshot.low_52w and snapshot.price:
@@ -205,30 +208,43 @@ def make_reco(
             score += 0.3
             confidence_factors.append(0.3)
 
-    # === Определение действия: BUY / ACCUMULATE / HOLD / REDUCE / SELL ===
+    # === Контекст рынка: bull → чаще ACCUMULATE, bear → усиливается REDUCE ===
+    regime = getattr(config, 'market_regime', 'sideways') or 'sideways'
+    regime_mod = {'bull': 0.25, 'bear': -0.25, 'sideways': 0.0}.get(regime.lower(), 0.0)
+    score_for_action = score + regime_mod
+    if regime_mod != 0:
+        reasons.append(f"○ Режим рынка: {regime}")
+
+    # === Определение действия: BUY / ACCUMULATE / HOLD_STRONG | HOLD_NEUTRAL / REDUCE / SELL ===
     accumulate_min = getattr(config, 'accumulate_score_min', 0.5)
-    reduce_max = getattr(config, 'avoid_score_max', -1.0)  # ниже → REDUCE (не докупать/сократить)
+    reduce_max = getattr(config, 'avoid_score_max', -1.0)
     price_below_sma200 = (
         snapshot.sma200 and snapshot.price and snapshot.price < snapshot.sma200
     )
+    price_above_sma200 = snapshot.sma200 and snapshot.price and snapshot.price >= snapshot.sma200
 
-    if score <= config.sell_score_cutoff:
+    if score_for_action <= config.sell_score_cutoff:
         action = "SELL"
-    elif score <= reduce_max:
+    elif score_for_action <= reduce_max:
         action = "REDUCE"
-    elif score >= config.buy_score_cutoff:
+    elif score_for_action >= config.buy_score_cutoff:
         action = "BUY"
-        # Для BUY: цена не ниже SMA200 или сильный фундамент (облигации/commodity не трогаем)
-        if asset_type == 'equity' and price_below_sma200 and score < getattr(config, 'buy_score_if_below_sma200', 3.2):
+        if asset_type == 'equity' and price_below_sma200 and score_for_action < getattr(config, 'buy_score_if_below_sma200', 3.2):
             action = "ACCUMULATE"
             reasons.append("○ BUY → ACCUMULATE: цена ниже SMA200, можно докупать понемногу")
-    elif score >= accumulate_min:
+    elif score_for_action >= accumulate_min:
         action = "ACCUMULATE"
     else:
-        action = "HOLD"
+        # HOLD разбиваем на два типа для UX: HOLD_STRONG vs HOLD_NEUTRAL
+        if score >= 0.2 or (price_above_sma200 and (snapshot.trend_pct_20d is None or snapshot.trend_pct_20d > -2.0)):
+            action = "HOLD_STRONG"
+            reasons.append("○ Держать; можно докупать при просадках")
+        else:
+            action = "HOLD_NEUTRAL"
+            reasons.append("○ Ничего не делаем")
 
-    # Commodity выше SMA200 при боковике: разрешаем ACCUMULATE (не оставлять HOLD при слабом score)
-    if action == "HOLD" and asset_type == "commodity" and snapshot.sma200 and snapshot.price:
+    # Commodity выше SMA200: разрешаем ACCUMULATE при слабом score
+    if action in ("HOLD_STRONG", "HOLD_NEUTRAL") and asset_type == "commodity" and snapshot.sma200 and snapshot.price:
         if snapshot.price >= snapshot.sma200 and score >= -0.5:
             action = "ACCUMULATE"
             reasons.append("○ Защитный актив выше SMA200 — можно докупать понемногу")
@@ -271,6 +287,10 @@ def _sizing_hint(
         return "Базовая доля (1×)"
     if action == "ACCUMULATE":
         return "Докупать понемногу"
+    if action == "HOLD_STRONG":
+        return "Держать; докупать при просадках"
+    if action == "HOLD_NEUTRAL":
+        return "Ничего не делаем"
     if action == "REDUCE":
         return "Не докупать; при желании сократить"
     if action == "SELL":

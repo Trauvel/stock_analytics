@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from typing import Literal, List, Optional
 
 
-Action = Literal["BUY", "ACCUMULATE", "HOLD", "REDUCE", "SELL"]
+Action = Literal["BUY", "ACCUMULATE", "HOLD_STRONG", "HOLD_NEUTRAL", "REDUCE", "SELL"]
 
 # Типы активов для разной логики scoring (commodity — не штрафовать за DY, fund — мягче тренд)
 AssetType = Literal["equity", "bond", "fund", "commodity"]
@@ -93,6 +93,9 @@ class RecoConfig:
     # Типы активов: commodity (золото и т.п.) — не штрафовать за DY; fund — мягче тренд
     commodity_tickers: List[str] = None  # например ["TGLD"]
     fund_tickers: List[str] = None  # ETF/фонды
+
+    # Контекст рынка: bull → чаще ACCUMULATE; bear → усиливается REDUCE; sideways — по умолчанию
+    market_regime: str = "sideways"  # sideways | bull | bear
 
     def __post_init__(self):
         if self.event_predictor_weights is None:

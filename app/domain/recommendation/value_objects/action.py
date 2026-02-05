@@ -5,11 +5,12 @@ from dataclasses import dataclass
 
 
 class ActionType(str, Enum):
-    """Типы действий рекомендации (4 уровня по отзыву)."""
+    """Типы действий рекомендации (в т.ч. HOLD_STRONG / HOLD_NEUTRAL для UX)."""
     BUY = "BUY"
     ACCUMULATE = "ACCUMULATE"
-    HOLD = "HOLD"
-    REDUCE = "REDUCE"  # не докупать / сократить (мягче, чем SELL)
+    HOLD_STRONG = "HOLD_STRONG"   # держать, можно докупать при просадках
+    HOLD_NEUTRAL = "HOLD_NEUTRAL"  # ничего не делаем
+    REDUCE = "REDUCE"
     SELL = "SELL"
 
 
@@ -28,8 +29,14 @@ class Action:
         return self.action_type == ActionType.SELL
     
     def is_hold(self) -> bool:
-        """Проверить, является ли действие удержанием."""
-        return self.action_type == ActionType.HOLD
+        """Проверить, является ли действие удержанием (любой HOLD)."""
+        return self.action_type in (ActionType.HOLD_STRONG, ActionType.HOLD_NEUTRAL)
+
+    def is_hold_strong(self) -> bool:
+        return self.action_type == ActionType.HOLD_STRONG
+
+    def is_hold_neutral(self) -> bool:
+        return self.action_type == ActionType.HOLD_NEUTRAL
 
     def is_accumulate(self) -> bool:
         """Проверить, является ли действие докупкой понемногу."""
